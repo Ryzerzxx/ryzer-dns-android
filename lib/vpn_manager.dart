@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:async';
 import 'package:flutter/services.dart';
 
 class VpnManager {
@@ -26,14 +27,38 @@ class VpnManager {
   }
 
   static Future<int?> measurePing(String host) async {
+    // 1. Try TCP Port 53 first
     try {
-      final stopwatch = Stopwatch()..start();
-      final socket = await Socket.connect(host, 53, timeout: const Duration(milliseconds: 2000));
-      stopwatch.stop();
+      final sw = Stopwatch()..start();
+      final socket = await Socket.connect(host, 53, timeout: const Duration(milliseconds: 1200));
+      sw.stop();
       socket.destroy();
-      return stopwatch.elapsedMilliseconds;
-    } catch (_) {
-      return null;
-    }
+      final ms = sw.elapsedMilliseconds;
+      if (ms > 0) return ms;
+    } catch (_) {}
+
+    // 2. Fallback to HTTPS ping to ryzerdns.ir
+    try {
+      final sw = Stopwatch()..start();
+      final client = HttpClient()..connectionTimeout = const Duration(milliseconds: 1500);
+      final req = await client.getUrl(Uri.parse('https://ryzerdns.ir/api/app/config'));
+      final resp = await req.close();
+      sw.stop();
+      client.close();
+      if (resp.statusCode == 200) {
+        return sw.elapsedMilliseconds;
+      }
+    } catch (_) {}
+
+    // 3. Fallback to secondary server
+    try {
+      final sw = Stopwatch()..start();
+      final socket = await Socket.connect('46.8.102.223', 53, timeout: const Duration(milliseconds: 1500));
+      sw.stop();
+      socket.destroy();
+      return sw.elapsedMilliseconds;
+    } catch (_) {}
+
+    return null;
   }
 }
