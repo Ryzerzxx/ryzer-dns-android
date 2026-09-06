@@ -344,15 +344,15 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
                       children: [
                         RichText(
                           text: const TextSpan(
-                            style: TextStyle(fontFamily: 'Syne', fontSize: 16, fontWeight: FontWeight.w800),
+                            style: TextStyle(fontFamily: 'Syne', fontSize: 17, fontWeight: FontWeight.w800),
                             children: [
                               TextSpan(text: 'RYZER', style: TextStyle(color: Colors.white)),
                               TextSpan(text: 'DNS', style: TextStyle(color: Color(0xFFFF3B5C))),
                             ],
                           ),
                         ),
-                        const SizedBox(width: 8),
-                        Image.asset('assets/nav-logo.png', width: 22, height: 22),
+                        const SizedBox(width: 9),
+                        Image.asset('assets/nav-logo.png', width: 32, height: 32),
                       ],
                     ),
                   ],
