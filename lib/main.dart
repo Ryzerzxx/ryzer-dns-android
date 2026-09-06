@@ -424,6 +424,21 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
                     : const Text('ورود', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13.5)),
               ),
             ),
+            const SizedBox(height: 14),
+            InkWell(
+              onTap: () => launchUrl(Uri.parse('https://ryzerdns.ir/panel'), mode: LaunchMode.externalApplication),
+              borderRadius: BorderRadius.circular(8),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 8),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: const [
+                    Text('حساب کاربری ندارید؟ ', style: TextStyle(color: Color(0xFF8E8EA8), fontSize: 11.5)),
+                    Text('ثبت‌نام در وب‌سایت', style: TextStyle(color: Color(0xFFFF3B5C), fontSize: 11.5, fontWeight: FontWeight.bold)),
+                  ],
+                ),
+              ),
+            ),
           ],
         ),
       ),
@@ -540,11 +555,29 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
                 children: [
                   Row(
                     children: [
-                      Text('$_pingMs ms', style: const TextStyle(color: Color(0xFFFF3B5C), fontSize: 13, fontWeight: FontWeight.bold, fontFamily: 'monospace')),
+                      Text(
+                        '$_pingMs ms',
+                        style: const TextStyle(
+                          color: Color(0xFF00E676),
+                          fontSize: 13.5,
+                          fontWeight: FontWeight.bold,
+                          fontFamily: 'monospace',
+                        ),
+                      ),
                       const SizedBox(width: 8),
-                      InkWell(
-                        onTap: _refreshPing,
-                        child: const Icon(Icons.refresh, color: Color(0xFF8E8EA8), size: 18),
+                      Material(
+                        color: Colors.transparent,
+                        child: InkWell(
+                          onTap: () async {
+                            setState(() => _pingMs = 0);
+                            await _refreshPing();
+                          },
+                          borderRadius: BorderRadius.circular(16),
+                          child: const Padding(
+                            padding: EdgeInsets.all(4),
+                            child: Icon(Icons.refresh, color: Color(0xFF8E8EA8), size: 18),
+                          ),
+                        ),
                       ),
                     ],
                   ),
