@@ -15,7 +15,6 @@ import java.io.FileOutputStream
 import java.net.DatagramPacket
 import java.net.DatagramSocket
 import java.net.InetAddress
-import java.nio.ByteBuffer
 
 class RyzerDnsVpnService : VpnService() {
 
@@ -28,6 +27,7 @@ class RyzerDnsVpnService : VpnService() {
         const val ACTION_STOP = "ir.ryzerdns.STOP_VPN"
         const val CHANNEL_ID = "ryzer_dns_service"
         private const val TAG = "RyzerDnsVpnService"
+        private const val VIRTUAL_DNS_IP = "10.254.1.1"
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -89,20 +89,19 @@ class RyzerDnsVpnService : VpnService() {
             val builder = Builder()
                 .setSession("RyzerDNS")
                 .addAddress("10.254.1.2", 30)
-                .addDnsServer(primaryDns)
-                .addDnsServer(secondaryDns)
-                // Route specific DNS IP destinations only (Zero game/download traffic touched!)
-                .addRoute(primaryDns, 32)
-                .addRoute(secondaryDns, 32)
-                .addRoute("1.1.1.1", 32)
-                .addRoute("8.8.8.8", 32)
+                // Use Virtual DNS address inside TUN
+                .addDnsServer(VIRTUAL_DNS_IP)
+                // Route ONLY the virtual DNS IP into TUN!
+                // CRITICAL: NEVER route primaryDns (87.248.145.40) directly into TUN,
+                // because all HTTPS port 443 traffic to relay IPs must go directly through physical network!
+                .addRoute(VIRTUAL_DNS_IP, 32)
                 .setMtu(1500)
                 .setBlocking(true)
 
             vpnInterface = builder.establish()
             isRunning = true
             startDnsForwardLoop(primaryDns, secondaryDns)
-            Log.i(TAG, "RyzerDNS local TUN interface established.")
+            Log.i(TAG, "RyzerDNS local TUN interface established on $VIRTUAL_DNS_IP")
         } catch (e: Exception) {
             Log.e(TAG, "Failed to establish VPN: ${e.message}")
             stopSelf()
@@ -131,7 +130,6 @@ class RyzerDnsVpnService : VpnService() {
                         continue
                     }
 
-                    // Check if IPv4 (version 4)
                     val version = (packet[0].toInt() shr 4) and 0x0F
                     if (version != 4) continue
 
@@ -147,7 +145,6 @@ class RyzerDnsVpnService : VpnService() {
                                 val dnsPayload = ByteArray(dnsLen)
                                 System.arraycopy(packet, ipHeaderLen + 8, dnsPayload, 0, dnsLen)
 
-                                // Forward to RyzerDNS primary (fallback secondary)
                                 val outPacket = DatagramPacket(dnsPayload, dnsPayload.size, primaryAddr, 53)
                                 try {
                                     socket.send(outPacket)
@@ -199,7 +196,7 @@ class RyzerDnsVpnService : VpnService() {
         reply[10] = 0
         reply[11] = 0
 
-        // Compute valid IPv4 Header Checksum!
+        // Compute valid IPv4 Header Checksum
         val ipChecksum = computeIpChecksum(reply, ipHeaderLen)
         reply[10] = ((ipChecksum shr 8) and 0xFF).toByte()
         reply[11] = (ipChecksum and 0xFF).toByte()
@@ -213,7 +210,7 @@ class RyzerDnsVpnService : VpnService() {
         val udpLen = 8 + dnsPayloadLen
         reply[ipHeaderLen + 4] = ((udpLen shr 8) and 0xFF).toByte()
         reply[ipHeaderLen + 5] = (udpLen and 0xFF).toByte()
-        reply[ipHeaderLen + 6] = 0 // UDP checksum optional in IPv4
+        reply[ipHeaderLen + 6] = 0
         reply[ipHeaderLen + 7] = 0
 
         // Copy DNS Answer Payload
