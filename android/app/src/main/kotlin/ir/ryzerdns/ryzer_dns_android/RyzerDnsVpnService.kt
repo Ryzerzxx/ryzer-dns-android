@@ -48,7 +48,7 @@ class RyzerDnsVpnService : VpnService() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
                 CHANNEL_ID,
-                "RyzerDNS Protection",
+                "RyzerDNS Service",
                 NotificationManager.IMPORTANCE_LOW
             )
             val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
@@ -70,7 +70,7 @@ class RyzerDnsVpnService : VpnService() {
             Notification.Builder(this, CHANNEL_ID)
                 .setContentTitle("RyzerDNS فعال است")
                 .setContentText("مسیرهای شبکه و دسترسی به بازی‌ها بهینه‌سازی شد")
-                .setSmallIcon(android.R.drawable.ic_dialog_info)
+                .setSmallIcon(R.mipmap.ic_launcher)
                 .setContentIntent(pendingIntent)
                 .build()
         } else {
@@ -78,7 +78,7 @@ class RyzerDnsVpnService : VpnService() {
             Notification.Builder(this)
                 .setContentTitle("RyzerDNS فعال است")
                 .setContentText("مسیرهای شبکه و دسترسی به بازی‌ها بهینه‌سازی شد")
-                .setSmallIcon(android.R.drawable.ic_dialog_info)
+                .setSmallIcon(R.mipmap.ic_launcher)
                 .setContentIntent(pendingIntent)
                 .build()
         }
@@ -88,18 +88,20 @@ class RyzerDnsVpnService : VpnService() {
         try {
             val builder = Builder()
                 .setSession("RyzerDNS")
-                .addAddress("10.254.1.1", 32)
+                .addAddress("10.254.1.2", 30)
                 .addDnsServer(primaryDns)
                 .addDnsServer(secondaryDns)
-                // ⚡ Only intercept DNS port 53 / DNS IPs! Zero game traffic intercept!
+                // Route specific DNS IP destinations only (Zero game/download traffic touched!)
                 .addRoute(primaryDns, 32)
                 .addRoute(secondaryDns, 32)
+                .addRoute("1.1.1.1", 32)
+                .addRoute("8.8.8.8", 32)
                 .setMtu(1500)
-                .setBlocking(false)
+                .setBlocking(true)
 
             vpnInterface = builder.establish()
             isRunning = true
-            startDnsForwardLoop(primaryDns)
+            startDnsForwardLoop(primaryDns, secondaryDns)
             Log.i(TAG, "RyzerDNS local TUN interface established.")
         } catch (e: Exception) {
             Log.e(TAG, "Failed to establish VPN: ${e.message}")
@@ -107,94 +109,131 @@ class RyzerDnsVpnService : VpnService() {
         }
     }
 
-    private fun startDnsForwardLoop(dnsServer: String) {
+    private fun startDnsForwardLoop(primaryDns: String, secondaryDns: String) {
         workerThread = Thread {
             val pfd = vpnInterface ?: return@Thread
-            val `in` = FileInputStream(pfd.fileDescriptor)
-            val out = FileOutputStream(pfd.fileDescriptor)
-            val packet = ByteBuffer.allocate(32768)
+            val inputStream = FileInputStream(pfd.fileDescriptor)
+            val outputStream = FileOutputStream(pfd.fileDescriptor)
+            val packet = ByteArray(32768)
 
             var socket: DatagramSocket? = null
             try {
                 socket = DatagramSocket()
-                protect(socket) // Ensure upstream socket bypasses local VPN loop!
-                socket.soTimeout = 2000
-                val targetAddr = InetAddress.getByName(dnsServer)
+                protect(socket)
+                socket.soTimeout = 2500
+                val primaryAddr = InetAddress.getByName(primaryDns)
+                val secondaryAddr = InetAddress.getByName(secondaryDns)
 
                 while (isRunning) {
-                    packet.clear()
-                    val length = `in`.read(packet.array())
-                    if (length > 0) {
-                        packet.limit(length)
-                        // Extract UDP payload if destination port is 53
-                        val ipHeaderLen = (packet.get(0).toInt() and 0x0F) * 4
-                        val protocol = packet.get(9).toInt()
+                    val length = inputStream.read(packet)
+                    if (length <= 0) {
+                        Thread.sleep(5)
+                        continue
+                    }
 
-                        if (protocol == 17 && length > ipHeaderLen + 8) { // UDP
-                            val dstPort = (packet.getShort(ipHeaderLen + 2).toInt() and 0xFFFF)
-                            if (dstPort == 53) {
-                                val udpPayloadLen = (packet.getShort(ipHeaderLen + 4).toInt() and 0xFFFF) - 8
-                                val dnsData = ByteArray(udpPayloadLen)
-                                System.arraycopy(packet.array(), ipHeaderLen + 8, dnsData, 0, udpPayloadLen)
+                    // Check if IPv4 (version 4)
+                    val version = (packet[0].toInt() shr 4) and 0x0F
+                    if (version != 4) continue
 
-                                val outPacket = DatagramPacket(dnsData, dnsData.size, targetAddr, 53)
-                                socket.send(outPacket)
+                    val ipHeaderLen = (packet[0].toInt() and 0x0F) * 4
+                    val protocol = packet[9].toInt() and 0xFF
 
-                                val inPacket = DatagramPacket(ByteArray(4096), 4096)
+                    if (protocol == 17 && length >= ipHeaderLen + 8) { // UDP
+                        val dstPort = ((packet[ipHeaderLen + 2].toInt() and 0xFF) shl 8) or (packet[ipHeaderLen + 3].toInt() and 0xFF)
+                        if (dstPort == 53) {
+                            val udpLen = ((packet[ipHeaderLen + 4].toInt() and 0xFF) shl 8) or (packet[ipHeaderLen + 5].toInt() and 0xFF)
+                            val dnsLen = udpLen - 8
+                            if (dnsLen > 0 && ipHeaderLen + 8 + dnsLen <= length) {
+                                val dnsPayload = ByteArray(dnsLen)
+                                System.arraycopy(packet, ipHeaderLen + 8, dnsPayload, 0, dnsLen)
+
+                                // Forward to RyzerDNS primary (fallback secondary)
+                                val outPacket = DatagramPacket(dnsPayload, dnsPayload.size, primaryAddr, 53)
+                                try {
+                                    socket.send(outPacket)
+                                } catch (e: Exception) {
+                                    try {
+                                        outPacket.address = secondaryAddr
+                                        socket.send(outPacket)
+                                    } catch (_: Exception) {}
+                                }
+
+                                val recvBuffer = ByteArray(4096)
+                                val inPacket = DatagramPacket(recvBuffer, recvBuffer.size)
                                 try {
                                     socket.receive(inPacket)
-                                    // Reconstruct reply packet
-                                    val replyPacket = buildReplyUdpPacket(packet.array(), inPacket.data, inPacket.length)
-                                    out.write(replyPacket)
+                                    val replyPacket = buildReplyUdpPacket(packet, ipHeaderLen, inPacket.data, inPacket.length)
+                                    outputStream.write(replyPacket)
                                 } catch (_: Exception) {}
                             }
                         }
-                    } else {
-                        Thread.sleep(10)
                     }
                 }
             } catch (e: Exception) {
-                Log.e(TAG, "DNS Loop error: ${e.message}")
+                Log.e(TAG, "DNS Loop exception: ${e.message}")
             } finally {
                 socket?.close()
             }
         }.apply { start() }
     }
 
-    private fun buildReplyUdpPacket(original: ByteArray, dnsPayload: ByteArray, payloadLen: Int): ByteArray {
-        val ipLen = (original[0].toInt() and 0x0F) * 4
-        val totalLen = ipLen + 8 + payloadLen
+    private fun buildReplyUdpPacket(original: ByteArray, ipHeaderLen: Int, dnsPayload: ByteArray, dnsPayloadLen: Int): ByteArray {
+        val totalLen = ipHeaderLen + 8 + dnsPayloadLen
         val reply = ByteArray(totalLen)
 
-        // Copy original IP header
-        System.arraycopy(original, 0, reply, 0, ipLen)
+        // Copy IP Header
+        System.arraycopy(original, 0, reply, 0, ipHeaderLen)
 
-        // Swap src and dst IP
-        System.arraycopy(original, 16, reply, 12, 4) // Dst becomes Src
-        System.arraycopy(original, 12, reply, 16, 4) // Src becomes Dst
+        // Swap IP source and destination (Original: Src 12..15, Dst 16..19)
+        System.arraycopy(original, 16, reply, 12, 4)
+        System.arraycopy(original, 12, reply, 16, 4)
 
-        // Total Length
+        // Set Total Length in IPv4 Header
         reply[2] = ((totalLen shr 8) and 0xFF).toByte()
         reply[3] = (totalLen and 0xFF).toByte()
-        reply[10] = 0 // Checksum reset
+
+        // Reset TTL
+        reply[8] = 64
+
+        // Clear checksum before computing
+        reply[10] = 0
         reply[11] = 0
 
-        // UDP Header
-        // Swap ports
-        reply[ipLen] = original[ipLen + 2]
-        reply[ipLen + 1] = original[ipLen + 3]
-        reply[ipLen + 2] = original[ipLen]
-        reply[ipLen + 3] = original[ipLen + 1]
+        // Compute valid IPv4 Header Checksum!
+        val ipChecksum = computeIpChecksum(reply, ipHeaderLen)
+        reply[10] = ((ipChecksum shr 8) and 0xFF).toByte()
+        reply[11] = (ipChecksum and 0xFF).toByte()
 
-        val udpLen = 8 + payloadLen
-        reply[ipLen + 4] = ((udpLen shr 8) and 0xFF).toByte()
-        reply[ipLen + 5] = (udpLen and 0xFF).toByte()
-        reply[ipLen + 6] = 0
-        reply[ipLen + 7] = 0
+        // UDP Header: Swap ports
+        reply[ipHeaderLen] = original[ipHeaderLen + 2]
+        reply[ipHeaderLen + 1] = original[ipHeaderLen + 3]
+        reply[ipHeaderLen + 2] = original[ipHeaderLen]
+        reply[ipHeaderLen + 3] = original[ipHeaderLen + 1]
 
-        // Payload
-        System.arraycopy(dnsPayload, 0, reply, ipLen + 8, payloadLen)
+        val udpLen = 8 + dnsPayloadLen
+        reply[ipHeaderLen + 4] = ((udpLen shr 8) and 0xFF).toByte()
+        reply[ipHeaderLen + 5] = (udpLen and 0xFF).toByte()
+        reply[ipHeaderLen + 6] = 0 // UDP checksum optional in IPv4
+        reply[ipHeaderLen + 7] = 0
+
+        // Copy DNS Answer Payload
+        System.arraycopy(dnsPayload, 0, reply, ipHeaderLen + 8, dnsPayloadLen)
         return reply
+    }
+
+    private fun computeIpChecksum(header: ByteArray, length: Int): Int {
+        var sum = 0
+        var i = 0
+        while (i < length) {
+            val high = header[i].toInt() and 0xFF
+            val low = if (i + 1 < length) header[i + 1].toInt() and 0xFF else 0
+            sum += (high shl 8) or low
+            i += 2
+        }
+        while ((sum shr 16) > 0) {
+            sum = (sum and 0xFFFF) + (sum shr 16)
+        }
+        return (sum.inv()) and 0xFFFF
     }
 
     private fun stopDnsVpn() {
