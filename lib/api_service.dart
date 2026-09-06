@@ -19,6 +19,7 @@ class ApiService {
       ).timeout(const Duration(seconds: 12));
 
       final data = jsonDecode(utf8.decode(response.bodyBytes));
+      // Support both status == 'success' or success == true or token presence
       if (response.statusCode == 200 && (data['status'] == 'success' || data['success'] == true || data['token'] != null)) {
         return {
           'success': true,
@@ -45,6 +46,7 @@ class ApiService {
 
       final data = jsonDecode(utf8.decode(response.bodyBytes));
       if (response.statusCode == 200 && (data['status'] == 'success' || data['plan_tier'] != null)) {
+        // Calculate remaining days if plan_expires_at is present
         int daysLeft = 30;
         bool isExpired = false;
         if (data['plan_expires_at'] != null) {
