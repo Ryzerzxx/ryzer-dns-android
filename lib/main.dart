@@ -273,23 +273,41 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
   }
 
   Widget _buildLinkCard(String title, String subtitle, String url) {
-    return InkWell(
-      onTap: () => launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication),
-      borderRadius: BorderRadius.circular(8),
-      child: Container(
-        margin: const EdgeInsets.only(bottom: 8),
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        decoration: BoxDecoration(
-          color: const Color(0xFF12121E),
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: const Color(0xFF222238)),
-        ),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            Text(title, style: const TextStyle(color: Colors.white, fontSize: 11.5, fontWeight: FontWeight.w600)),
-            Text(subtitle, style: const TextStyle(color: Color(0xFF8E8EA8), fontSize: 11, fontFamily: 'monospace')),
-          ],
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: () => launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication),
+        borderRadius: BorderRadius.circular(10),
+        splashColor: const Color(0x33FF3B5C),
+        highlightColor: const Color(0x22FF3B5C),
+        child: Container(
+          margin: const EdgeInsets.only(bottom: 8),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+          decoration: BoxDecoration(
+            color: const Color(0xFF141422),
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: const Color(0xFF26263A)),
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                title,
+                style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600),
+              ),
+              Directionality(
+                textDirection: TextDirection.ltr,
+                child: Text(
+                  subtitle,
+                  style: const TextStyle(
+                    color: Color(0xFFFF3B5C),
+                    fontSize: 11.5,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
