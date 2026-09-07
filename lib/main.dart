@@ -1289,7 +1289,6 @@ class _AuthModalSheetState extends State<AuthModalSheet> {
             // Native Google Sign-In with Play Services Dialog directly on Android!
             final googleSignIn = GoogleSignIn(
               scopes: ['email', 'profile'],
-              serverClientId: '607759999989-rkpp4ovbl69o73vqaunhue5h4frainq7.apps.googleusercontent.com',
             );
 
             // Force sign out to ensure account chooser dialog always pops up
