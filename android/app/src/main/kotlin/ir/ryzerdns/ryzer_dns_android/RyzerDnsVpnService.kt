@@ -96,12 +96,25 @@ class RyzerDnsVpnService : VpnService() {
         try {
             val builder = Builder()
                 .setSession("RyzerDNS")
-                .addAddress(LOCAL_CLIENT_IP, 30)
+                .addAddress(LOCAL_CLIENT_IP, 24)
                 .addDnsServer(VIRTUAL_DNS_IP)
-                // Intercept DNS traffic only to keep all HTTPS/TCP/Gaming direct
+                // Intercept DNS virtual server only
                 .addRoute(VIRTUAL_DNS_IP, 32)
                 .setMtu(1500)
                 .setBlocking(true)
+
+            // CRITICAL: allowBypass() allows all non-DNS system apps & games to directly reach the internet!
+            builder.allowBypass()
+
+            // Allow standard IP families
+            try {
+                builder.allowFamily(android.system.OsConstants.AF_INET)
+                builder.allowFamily(android.system.OsConstants.AF_INET6)
+            } catch (_: Throwable) {}
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                try { builder.setMetered(false) } catch (_: Throwable) {}
+            }
 
             vpnInterface = builder.establish()
             isRunning = true
@@ -261,14 +274,54 @@ class RyzerDnsVpnService : VpnService() {
         packet[24] = ((udpLen shr 8) and 0xFF).toByte()
         packet[25] = (udpLen and 0xFF).toByte()
 
-        // UDP Checksum (0 = disabled in IPv4, widely supported)
-        packet[26] = 0x00.toByte()
-        packet[27] = 0x00.toByte()
-
         // 3. DNS Payload
         System.arraycopy(dnsPayload, 0, packet, ipHeaderLen + udpHeaderLen, dnsPayloadLen)
 
+        // Compute valid UDP Checksum with IPv4 Pseudo Header
+        val udpChecksum = computeUdpChecksum(packet, ipHeaderLen, udpHeaderLen, dnsPayloadLen)
+        packet[26] = ((udpChecksum shr 8) and 0xFF).toByte()
+        packet[27] = (udpChecksum and 0xFF).toByte()
+
         return packet
+    }
+
+    private fun computeUdpChecksum(packet: ByteArray, ipHeaderLen: Int, udpHeaderLen: Int, payloadLen: Int): Int {
+        val udpLen = udpHeaderLen + payloadLen
+        var sum = 0
+
+        // Pseudo Header: Source IP (12..15)
+        sum += ((packet[12].toInt() and 0xFF) shl 8) or (packet[13].toInt() and 0xFF)
+        sum += ((packet[14].toInt() and 0xFF) shl 8) or (packet[15].toInt() and 0xFF)
+
+        // Pseudo Header: Destination IP (16..19)
+        sum += ((packet[16].toInt() and 0xFF) shl 8) or (packet[17].toInt() and 0xFF)
+        sum += ((packet[18].toInt() and 0xFF) shl 8) or (packet[19].toInt() and 0xFF)
+
+        // Protocol (17) + UDP Length
+        sum += 17
+        sum += udpLen
+
+        // UDP Header: Ports + Length
+        sum += ((packet[20].toInt() and 0xFF) shl 8) or (packet[21].toInt() and 0xFF)
+        sum += ((packet[22].toInt() and 0xFF) shl 8) or (packet[23].toInt() and 0xFF)
+        sum += udpLen
+
+        // DNS Payload 16-bit words
+        val payloadStart = ipHeaderLen + udpHeaderLen
+        var i = 0
+        while (i < payloadLen) {
+            val high = packet[payloadStart + i].toInt() and 0xFF
+            val low = if (i + 1 < payloadLen) packet[payloadStart + i + 1].toInt() and 0xFF else 0
+            sum += (high shl 8) or low
+            i += 2
+        }
+
+        while ((sum shr 16) > 0) {
+            sum = (sum and 0xFFFF) + (sum shr 16)
+        }
+
+        val res = (sum.inv()) and 0xFFFF
+        return if (res == 0) 0xFFFF else res
     }
 
     private fun computeIpChecksum(header: ByteArray, length: Int): Int {
