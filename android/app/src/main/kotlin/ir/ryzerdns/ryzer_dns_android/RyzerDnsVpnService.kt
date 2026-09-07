@@ -34,8 +34,10 @@ class RyzerDnsVpnService : VpnService() {
         const val ACTION_STOP = "ir.ryzerdns.STOP_VPN"
         const val CHANNEL_ID = "ryzer_dns_service"
         private const val TAG = "RyzerDnsVpnService"
-        private const val VIRTUAL_DNS_IP = "10.254.1.1"
-        private const val LOCAL_CLIENT_IP = "10.254.1.2"
+        const val VIRTUAL_DNS_IP = "10.254.1.1"
+        const val LOCAL_CLIENT_IP = "10.254.1.2"
+        const val VIRTUAL_DNS_IPV6 = "fd00::1"
+        const val LOCAL_CLIENT_IPV6 = "fd00::2"
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -98,10 +100,18 @@ class RyzerDnsVpnService : VpnService() {
                 .setSession("RyzerDNS")
                 .addAddress(LOCAL_CLIENT_IP, 24)
                 .addDnsServer(VIRTUAL_DNS_IP)
-                // Intercept DNS virtual server only
                 .addRoute(VIRTUAL_DNS_IP, 32)
                 .setMtu(1500)
                 .setBlocking(true)
+
+            // Prevent IPv6 DNS leaks: assign virtual IPv6 DNS so system doesn't query carrier IPv6 resolvers
+            try {
+                builder.addAddress(LOCAL_CLIENT_IPV6, 120)
+                builder.addDnsServer(VIRTUAL_DNS_IPV6)
+                builder.addRoute(VIRTUAL_DNS_IPV6, 128)
+            } catch (e: Throwable) {
+                Log.w(TAG, "IPv6 setup skipped: ${e.message}")
+            }
 
             // CRITICAL: allowBypass() allows all non-DNS system apps & games to directly reach the internet!
             builder.allowBypass()
@@ -153,7 +163,12 @@ class RyzerDnsVpnService : VpnService() {
                         }
 
                         val version = (packet[0].toInt() shr 4) and 0x0F
-                        if (version != 4) continue
+                        if (version != 4 && version != 6) continue
+
+                        if (version == 6) {
+                            // If Android OS sends IPv6 DNS query to fd00::1, consume & ignore to force instant IPv4 fallback
+                            continue
+                        }
 
                         val ipHeaderLen = (packet[0].toInt() and 0x0F) * 4
                         val protocol = packet[9].toInt() and 0xFF
