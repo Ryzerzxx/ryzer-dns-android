@@ -1417,6 +1417,7 @@ class _AuthModalSheetState extends State<AuthModalSheet> {
           try {
             // Native Google Sign-In with Play Services Dialog directly on Android!
             final googleSignIn = GoogleSignIn(
+              serverClientId: '607759999989-rkpp4ovbl69o73vqaunhue5h4frainq7.apps.googleusercontent.com',
               scopes: ['email', 'profile'],
             );
 
