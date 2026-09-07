@@ -274,7 +274,7 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
             )
           else
             ElevatedButton(
-              onTap: _showAuthModal,
+              onPressed: _showAuthModal,
               style: ElevatedButton.styleFrom(
                 backgroundColor: const Color(0xFFFF3B5C),
                 foregroundColor: Colors.white,
@@ -329,7 +329,7 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
             ),
             const SizedBox(height: 12),
             OutlinedButton.icon(
-              onTap: _showAuthModal,
+              onPressed: _showAuthModal,
               icon: const Icon(Icons.login, size: 16, color: Color(0xFFFF3B5C)),
               label: const Text('ورود سریع یا ایجاد حساب', style: TextStyle(color: Colors.white, fontSize: 12.5, fontWeight: FontWeight.w700)),
               style: OutlinedButton.styleFrom(
@@ -398,7 +398,7 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
             ],
           ),
           ElevatedButton(
-            onTap: () => setState(() => _currentNavIndex = 1),
+            onPressed: () => setState(() => _currentNavIndex = 1),
             style: ElevatedButton.styleFrom(
               backgroundColor: const Color(0x1AFF3B5C),
               foregroundColor: const Color(0xFFFF3B5C),
@@ -669,7 +669,7 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
             children: [
               Expanded(
                 child: OutlinedButton(
-                  onTap: () => _handlePurchasePlan(tier, 1, price1m),
+                  onPressed: () => _handlePurchasePlan(tier, 1, price1m),
                   style: OutlinedButton.styleFrom(
                     side: const BorderSide(color: Color(0x4DFFFFFF)),
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
@@ -687,7 +687,7 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
               const SizedBox(width: 10),
               Expanded(
                 child: ElevatedButton(
-                  onTap: () => _handlePurchasePlan(tier, 3, price3m),
+                  onPressed: () => _handlePurchasePlan(tier, 3, price3m),
                   style: ElevatedButton.styleFrom(
                     backgroundColor: isPro ? const Color(0xFFFF3B5C) : const Color(0x33FFFFFF),
                     foregroundColor: Colors.white,
@@ -792,7 +792,7 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
             const Text('ابتدا وارد حساب کاربری خود شوید.', style: TextStyle(fontSize: 14, color: Colors.white70)),
             const SizedBox(height: 14),
             ElevatedButton(
-              onTap: _showAuthModal,
+              onPressed: _showAuthModal,
               style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFFF3B5C)),
               child: const Text('ورود به حساب'),
             ),
@@ -1229,7 +1229,7 @@ class _AuthModalSheetState extends State<AuthModalSheet> {
       width: double.infinity,
       height: 44,
       child: ElevatedButton(
-        onTap: _isLoading ? null : onPressed,
+        onPressed: _isLoading ? null : onPressed,
         style: ElevatedButton.styleFrom(
           backgroundColor: const Color(0xFFFF3B5C),
           foregroundColor: Colors.white,
@@ -1248,7 +1248,7 @@ class _AuthModalSheetState extends State<AuthModalSheet> {
       width: double.infinity,
       height: 44,
       child: OutlinedButton(
-        onTap: () async {
+        onPressed: () async {
           // Open web Google Auth flow directly in Chrome/Default browser
           final mode = _isLoginTab ? 'login' : 'register';
           final url = Uri.parse('https://ryzerdns.ir/auth?mode=$mode');
