@@ -135,8 +135,8 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
     } else {
       setState(() => _isConnecting = true);
       // If user is logged in, register IP with user token
-      if (token != null && token.isNotEmpty) {
-        final regSuccess = await ApiService.registerIp(token);
+      if (_userToken != null && _userToken!.isNotEmpty) {
+        final regSuccess = await ApiService.registerIp(_userToken!);
         if (!regSuccess) {
           setState(() => _isConnecting = false);
           _showToast('ثبت آی‌پی با خطا مواجه شد. اشتراک خود را بررسی نمایید.');
