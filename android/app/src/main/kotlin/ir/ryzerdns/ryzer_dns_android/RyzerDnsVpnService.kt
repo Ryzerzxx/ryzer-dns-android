@@ -15,12 +15,19 @@ import java.io.FileOutputStream
 import java.net.DatagramPacket
 import java.net.DatagramSocket
 import java.net.InetAddress
+import java.util.concurrent.ConcurrentHashMap
 
 class RyzerDnsVpnService : VpnService() {
 
     private var vpnInterface: ParcelFileDescriptor? = null
+    @Volatile
     private var isRunning = false
-    private var workerThread: Thread? = null
+    private var tunReaderThread: Thread? = null
+    private var udpReceiverThread: Thread? = null
+    private var dnsSocket: DatagramSocket? = null
+
+    // Map DNS Transaction ID -> Client Source Port to route replies accurately
+    private val pendingQueries = ConcurrentHashMap<Int, Int>()
 
     companion object {
         const val ACTION_START = "ir.ryzerdns.START_VPN"
@@ -28,6 +35,7 @@ class RyzerDnsVpnService : VpnService() {
         const val CHANNEL_ID = "ryzer_dns_service"
         private const val TAG = "RyzerDnsVpnService"
         private const val VIRTUAL_DNS_IP = "10.254.1.1"
+        private const val LOCAL_CLIENT_IP = "10.254.1.2"
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -69,7 +77,7 @@ class RyzerDnsVpnService : VpnService() {
         val notification: Notification = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             Notification.Builder(this, CHANNEL_ID)
                 .setContentTitle("RyzerDNS فعال است")
-                .setContentText("مسیرهای شبکه و دسترسی به بازی‌ها بهینه‌سازی شد")
+                .setContentText("مسیرهای شبکه و بازی‌ها بهینه‌سازی شد")
                 .setSmallIcon(R.mipmap.ic_launcher)
                 .setContentIntent(pendingIntent)
                 .build()
@@ -77,7 +85,7 @@ class RyzerDnsVpnService : VpnService() {
             @Suppress("DEPRECATION")
             Notification.Builder(this)
                 .setContentTitle("RyzerDNS فعال است")
-                .setContentText("مسیرهای شبکه و دسترسی به بازی‌ها بهینه‌سازی شد")
+                .setContentText("مسیرهای شبکه و بازی‌ها بهینه‌سازی شد")
                 .setSmallIcon(R.mipmap.ic_launcher)
                 .setContentIntent(pendingIntent)
                 .build()
@@ -88,134 +96,179 @@ class RyzerDnsVpnService : VpnService() {
         try {
             val builder = Builder()
                 .setSession("RyzerDNS")
-                .addAddress("10.254.1.2", 30)
-                // Use Virtual DNS address inside TUN
+                .addAddress(LOCAL_CLIENT_IP, 30)
                 .addDnsServer(VIRTUAL_DNS_IP)
-                // Route ONLY the virtual DNS IP into TUN!
-                // CRITICAL: NEVER route primaryDns (87.248.145.40) directly into TUN,
-                // because all HTTPS port 443 traffic to relay IPs must go directly through physical network!
+                // Intercept DNS traffic only to keep all HTTPS/TCP/Gaming direct
                 .addRoute(VIRTUAL_DNS_IP, 32)
                 .setMtu(1500)
                 .setBlocking(true)
 
             vpnInterface = builder.establish()
             isRunning = true
-            startDnsForwardLoop(primaryDns, secondaryDns)
-            Log.i(TAG, "RyzerDNS local TUN interface established on $VIRTUAL_DNS_IP")
+
+            startAsynchronousDnsRelay(primaryDns, secondaryDns)
+            Log.i(TAG, "RyzerDNS asynchronous TUN relay established on $VIRTUAL_DNS_IP")
         } catch (e: Exception) {
             Log.e(TAG, "Failed to establish VPN: ${e.message}")
             stopSelf()
         }
     }
 
-    private fun startDnsForwardLoop(primaryDns: String, secondaryDns: String) {
-        workerThread = Thread {
-            val pfd = vpnInterface ?: return@Thread
-            val inputStream = FileInputStream(pfd.fileDescriptor)
-            val outputStream = FileOutputStream(pfd.fileDescriptor)
-            val packet = ByteArray(32768)
+    private fun startAsynchronousDnsRelay(primaryDns: String, secondaryDns: String) {
+        val pfd = vpnInterface ?: return
+        val inputStream = FileInputStream(pfd.fileDescriptor)
+        val outputStream = FileOutputStream(pfd.fileDescriptor)
 
-            var socket: DatagramSocket? = null
-            try {
-                socket = DatagramSocket()
-                protect(socket)
-                socket.soTimeout = 2500
-                val primaryAddr = InetAddress.getByName(primaryDns)
-                val secondaryAddr = InetAddress.getByName(secondaryDns)
+        try {
+            val socket = DatagramSocket()
+            protect(socket)
+            socket.soTimeout = 0 // Never timeout the receiver thread!
+            dnsSocket = socket
 
+            val primaryAddr = InetAddress.getByName(primaryDns)
+            val secondaryAddr = InetAddress.getByName(secondaryDns)
+
+            // Thread 1: Read TUN queries from Android OS -> Forward to Upstream
+            tunReaderThread = Thread {
+                val packet = ByteArray(32768)
                 while (isRunning) {
-                    val length = inputStream.read(packet)
-                    if (length <= 0) {
-                        Thread.sleep(5)
-                        continue
-                    }
+                    try {
+                        val length = inputStream.read(packet)
+                        if (length <= 0) {
+                            Thread.sleep(2)
+                            continue
+                        }
 
-                    val version = (packet[0].toInt() shr 4) and 0x0F
-                    if (version != 4) continue
+                        val version = (packet[0].toInt() shr 4) and 0x0F
+                        if (version != 4) continue
 
-                    val ipHeaderLen = (packet[0].toInt() and 0x0F) * 4
-                    val protocol = packet[9].toInt() and 0xFF
+                        val ipHeaderLen = (packet[0].toInt() and 0x0F) * 4
+                        val protocol = packet[9].toInt() and 0xFF
 
-                    if (protocol == 17 && length >= ipHeaderLen + 8) { // UDP
-                        val dstPort = ((packet[ipHeaderLen + 2].toInt() and 0xFF) shl 8) or (packet[ipHeaderLen + 3].toInt() and 0xFF)
-                        if (dstPort == 53) {
-                            val udpLen = ((packet[ipHeaderLen + 4].toInt() and 0xFF) shl 8) or (packet[ipHeaderLen + 5].toInt() and 0xFF)
-                            val dnsLen = udpLen - 8
-                            if (dnsLen > 0 && ipHeaderLen + 8 + dnsLen <= length) {
-                                val dnsPayload = ByteArray(dnsLen)
-                                System.arraycopy(packet, ipHeaderLen + 8, dnsPayload, 0, dnsLen)
+                        // UDP packet check
+                        if (protocol == 17 && length >= ipHeaderLen + 8) {
+                            val srcPort = ((packet[ipHeaderLen].toInt() and 0xFF) shl 8) or (packet[ipHeaderLen + 1].toInt() and 0xFF)
+                            val dstPort = ((packet[ipHeaderLen + 2].toInt() and 0xFF) shl 8) or (packet[ipHeaderLen + 3].toInt() and 0xFF)
 
-                                val outPacket = DatagramPacket(dnsPayload, dnsPayload.size, primaryAddr, 53)
-                                try {
-                                    socket.send(outPacket)
-                                } catch (e: Exception) {
+                            if (dstPort == 53) {
+                                val udpLen = ((packet[ipHeaderLen + 4].toInt() and 0xFF) shl 8) or (packet[ipHeaderLen + 5].toInt() and 0xFF)
+                                val dnsLen = udpLen - 8
+                                if (dnsLen >= 12 && ipHeaderLen + 8 + dnsLen <= length) {
+                                    val dnsPayload = ByteArray(dnsLen)
+                                    System.arraycopy(packet, ipHeaderLen + 8, dnsPayload, 0, dnsLen)
+
+                                    // Extract 16-bit DNS Transaction ID
+                                    val txId = ((dnsPayload[0].toInt() and 0xFF) shl 8) or (dnsPayload[1].toInt() and 0xFF)
+                                    pendingQueries[txId] = srcPort
+
+                                    // Send out to Primary Upstream Server
+                                    val outPacket = DatagramPacket(dnsPayload, dnsPayload.size, primaryAddr, 53)
                                     try {
-                                        outPacket.address = secondaryAddr
                                         socket.send(outPacket)
-                                    } catch (_: Exception) {}
+                                    } catch (_: Exception) {
+                                        try {
+                                            outPacket.address = secondaryAddr
+                                            socket.send(outPacket)
+                                        } catch (_: Exception) {}
+                                    }
                                 }
-
-                                val recvBuffer = ByteArray(4096)
-                                val inPacket = DatagramPacket(recvBuffer, recvBuffer.size)
-                                try {
-                                    socket.receive(inPacket)
-                                    val replyPacket = buildReplyUdpPacket(packet, ipHeaderLen, inPacket.data, inPacket.length)
-                                    outputStream.write(replyPacket)
-                                } catch (_: Exception) {}
                             }
                         }
+                    } catch (e: Exception) {
+                        if (!isRunning) break
                     }
                 }
-            } catch (e: Exception) {
-                Log.e(TAG, "DNS Loop exception: ${e.message}")
-            } finally {
-                socket?.close()
-            }
-        }.apply { start() }
+            }.apply { start() }
+
+            // Thread 2: Receive upstream DNS replies -> Inject back into TUN
+            udpReceiverThread = Thread {
+                val recvBuffer = ByteArray(4096)
+                while (isRunning) {
+                    try {
+                        val inPacket = DatagramPacket(recvBuffer, recvBuffer.size)
+                        socket.receive(inPacket)
+
+                        val payloadLen = inPacket.length
+                        if (payloadLen >= 12) {
+                            val data = inPacket.data
+                            val txId = ((data[0].toInt() and 0xFF) shl 8) or (data[1].toInt() and 0xFF)
+                            val clientPort = pendingQueries.remove(txId) ?: 53
+
+                            val replyPacket = buildReplyUdpPacket(data, payloadLen, clientPort)
+                            synchronized(outputStream) {
+                                outputStream.write(replyPacket)
+                            }
+                        }
+                    } catch (e: Exception) {
+                        if (!isRunning) break
+                    }
+                }
+            }.apply { start() }
+
+        } catch (e: Exception) {
+            Log.e(TAG, "Relay setup failed: ${e.message}")
+        }
     }
 
-    private fun buildReplyUdpPacket(original: ByteArray, ipHeaderLen: Int, dnsPayload: ByteArray, dnsPayloadLen: Int): ByteArray {
-        val totalLen = ipHeaderLen + 8 + dnsPayloadLen
-        val reply = ByteArray(totalLen)
+    private fun buildReplyUdpPacket(dnsPayload: ByteArray, dnsPayloadLen: Int, clientPort: Int): ByteArray {
+        val ipHeaderLen = 20
+        val udpHeaderLen = 8
+        val totalLen = ipHeaderLen + udpHeaderLen + dnsPayloadLen
+        val packet = ByteArray(totalLen)
 
-        // Copy IP Header
-        System.arraycopy(original, 0, reply, 0, ipHeaderLen)
+        // 1. IPv4 Header
+        packet[0] = 0x45.toByte() // Version 4, IHL 5 (20 bytes)
+        packet[1] = 0x00.toByte() // DSCP/ECN
+        packet[2] = ((totalLen shr 8) and 0xFF).toByte()
+        packet[3] = (totalLen and 0xFF).toByte()
+        packet[4] = 0x00.toByte() // Identification
+        packet[5] = 0x00.toByte()
+        packet[6] = 0x40.toByte() // Don't fragment
+        packet[7] = 0x00.toByte()
+        packet[8] = 64.toByte()   // TTL
+        packet[9] = 17.toByte()   // Protocol: UDP (17)
+        packet[10] = 0x00.toByte() // Checksum placeholder
+        packet[11] = 0x00.toByte()
 
-        // Swap IP source and destination (Original: Src 12..15, Dst 16..19)
-        System.arraycopy(original, 16, reply, 12, 4)
-        System.arraycopy(original, 12, reply, 16, 4)
+        // Source IP: 10.254.1.1 (Virtual DNS)
+        packet[12] = 10.toByte()
+        packet[13] = 254.toByte()
+        packet[14] = 1.toByte()
+        packet[15] = 1.toByte()
 
-        // Set Total Length in IPv4 Header
-        reply[2] = ((totalLen shr 8) and 0xFF).toByte()
-        reply[3] = (totalLen and 0xFF).toByte()
+        // Destination IP: 10.254.1.2 (Client TUN)
+        packet[16] = 10.toByte()
+        packet[17] = 254.toByte()
+        packet[18] = 1.toByte()
+        packet[19] = 2.toByte()
 
-        // Reset TTL
-        reply[8] = 64
+        // IPv4 Header Checksum
+        val ipChecksum = computeIpChecksum(packet, ipHeaderLen)
+        packet[10] = ((ipChecksum shr 8) and 0xFF).toByte()
+        packet[11] = (ipChecksum and 0xFF).toByte()
 
-        // Clear checksum before computing
-        reply[10] = 0
-        reply[11] = 0
+        // 2. UDP Header
+        // Source Port: 53
+        packet[20] = 0x00.toByte()
+        packet[21] = 53.toByte()
 
-        // Compute valid IPv4 Header Checksum
-        val ipChecksum = computeIpChecksum(reply, ipHeaderLen)
-        reply[10] = ((ipChecksum shr 8) and 0xFF).toByte()
-        reply[11] = (ipChecksum and 0xFF).toByte()
+        // Destination Port: clientPort
+        packet[22] = ((clientPort shr 8) and 0xFF).toByte()
+        packet[23] = (clientPort and 0xFF).toByte()
 
-        // UDP Header: Swap ports
-        reply[ipHeaderLen] = original[ipHeaderLen + 2]
-        reply[ipHeaderLen + 1] = original[ipHeaderLen + 3]
-        reply[ipHeaderLen + 2] = original[ipHeaderLen]
-        reply[ipHeaderLen + 3] = original[ipHeaderLen + 1]
+        // UDP Length
+        val udpLen = udpHeaderLen + dnsPayloadLen
+        packet[24] = ((udpLen shr 8) and 0xFF).toByte()
+        packet[25] = (udpLen and 0xFF).toByte()
 
-        val udpLen = 8 + dnsPayloadLen
-        reply[ipHeaderLen + 4] = ((udpLen shr 8) and 0xFF).toByte()
-        reply[ipHeaderLen + 5] = (udpLen and 0xFF).toByte()
-        reply[ipHeaderLen + 6] = 0
-        reply[ipHeaderLen + 7] = 0
+        // UDP Checksum (0 = disabled in IPv4, widely supported)
+        packet[26] = 0x00.toByte()
+        packet[27] = 0x00.toByte()
 
-        // Copy DNS Answer Payload
-        System.arraycopy(dnsPayload, 0, reply, ipHeaderLen + 8, dnsPayloadLen)
-        return reply
+        // 3. DNS Payload
+        System.arraycopy(dnsPayload, 0, packet, ipHeaderLen + udpHeaderLen, dnsPayloadLen)
+
+        return packet
     }
 
     private fun computeIpChecksum(header: ByteArray, length: Int): Int {
@@ -235,11 +288,17 @@ class RyzerDnsVpnService : VpnService() {
 
     private fun stopDnsVpn() {
         isRunning = false
-        workerThread?.interrupt()
+        tunReaderThread?.interrupt()
+        udpReceiverThread?.interrupt()
+        try {
+            dnsSocket?.close()
+            dnsSocket = null
+        } catch (_: Exception) {}
         try {
             vpnInterface?.close()
             vpnInterface = null
         } catch (_: Exception) {}
+        pendingQueries.clear()
         stopForeground(true)
         stopSelf()
         Log.i(TAG, "RyzerDNS VPN Stopped.")

@@ -85,6 +85,8 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
     if (token != null && token.isNotEmpty) {
       setState(() => _userToken = token);
       await _refreshUserProfile();
+      // Auto-register device IP silently on startup!
+      ApiService.registerIp(token);
     }
     _refreshPing();
     _pingTimer = Timer.periodic(const Duration(seconds: 15), (_) {
@@ -132,11 +134,14 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
       _showToast('ارتباط با RyzerDNS قطع شد.');
     } else {
       setState(() => _isConnecting = true);
-      final registered = await ApiService.registerIp(_userToken!);
-      if (!registered) {
-        setState(() => _isConnecting = false);
-        _showToast('ثبت آی‌پی با خطا مواجه شد. اشتراک خود را بررسی نمایید.');
-        return;
+      // If user is logged in, register IP with user token
+      if (token != null && token.isNotEmpty) {
+        final regSuccess = await ApiService.registerIp(token);
+        if (!regSuccess) {
+          setState(() => _isConnecting = false);
+          _showToast('ثبت آی‌پی با خطا مواجه شد. اشتراک خود را بررسی نمایید.');
+          return;
+        }
       }
 
       final success = await VpnManager.startVpn(
