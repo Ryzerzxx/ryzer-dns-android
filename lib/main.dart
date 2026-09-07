@@ -341,18 +341,29 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
                       ],
                     ),
                     Row(
+                      crossAxisAlignment: CrossAxisAlignment.center,
                       children: [
                         RichText(
                           text: const TextSpan(
-                            style: TextStyle(fontFamily: 'Syne', fontSize: 17, fontWeight: FontWeight.w800),
+                            style: TextStyle(
+                              fontFamily: 'Syne',
+                              fontSize: 18,
+                              fontWeight: FontWeight.w800,
+                              height: 1.0,
+                            ),
                             children: [
                               TextSpan(text: 'RYZER', style: TextStyle(color: Colors.white)),
                               TextSpan(text: 'DNS', style: TextStyle(color: Color(0xFFFF3B5C))),
                             ],
                           ),
                         ),
-                        const SizedBox(width: 9),
-                        Image.asset('assets/nav-logo.png', width: 32, height: 32),
+                        const SizedBox(width: 10),
+                        Image.asset(
+                          'assets/nav-logo.png',
+                          width: 38,
+                          height: 38,
+                          fit: BoxFit.contain,
+                        ),
                       ],
                     ),
                   ],
