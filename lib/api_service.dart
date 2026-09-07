@@ -332,6 +332,44 @@ class ApiService {
     };
   }
 
+  /// Authenticate with Google ID Token / Access Token directly from Google Play Services
+  static Future<Map<String, dynamic>> authWithGoogleToken({
+    required String token,
+    required String mode,
+  }) async {
+    try {
+      final response = await http.post(
+        Uri.parse('$baseUrl/api/auth/google'),
+        headers: {
+          'Content-Type': 'application/json',
+          'User-Agent': userAgent,
+        },
+        body: jsonEncode({
+          'credential': token,
+          'mode': mode,
+          'ref_code': '',
+          'init_data': '',
+        }),
+      ).timeout(const Duration(seconds: 12));
+
+      final data = jsonDecode(utf8.decode(response.bodyBytes));
+      if (response.statusCode == 200 && data['token'] != null) {
+        return {
+          'success': true,
+          'token': data['token'],
+          'displayName': data['web_username'] ?? 'کاربر',
+        };
+      } else {
+        return {
+          'success': false,
+          'message': data['detail'] ?? data['message'] ?? 'خطا در احراز هویت با حساب گوگل.',
+        };
+      }
+    } catch (e) {
+      return {'success': false, 'message': 'خطا در ارتباط با سرور.'};
+    }
+  }
+
   /// Initialize Google OAuth State for Android Client
   static Future<Map<String, dynamic>> initGoogleAuth(String mode, String nonce) async {
     try {

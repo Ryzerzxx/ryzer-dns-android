@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:google_sign_in/google_sign_in.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'api_service.dart';
@@ -531,7 +532,7 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
               ),
               const SizedBox(width: 8),
               Text(
-                _isConnected ? 'مسیر اختصاصی گیم' : 'سرویس غیرفعال',
+                _isConnected ? 'سرویس فعال' : 'سرویس غیرفعال',
                 style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: Colors.white),
               ),
             ],
@@ -615,11 +616,12 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
         const SizedBox(height: 20),
         _buildPlanCard(
           tier: 'pro',
-          title: 'پلن PRO (ویژه گیمینگ و تحریم‌شکن)',
+          title: 'پلن PRO (نامحدود و کامل)',
           features: [
-            'تونل پرسرعت اختصاصی US Yamux',
-            'پشتیبانی کامل FC 26, Valorant, Warzone, The Finals',
-            'ترافیک نامحدود و اولویت ۱۰۰٪ سرورها',
+            'دسترسی به کل ۳۰,۰۰۰ دامنه تحریم‌شده بین‌المللی',
+            'پشتیبانی کامل هوش مصنوعی (ChatGPT, Claude, Gemini)',
+            'پشتیبانی کلیه بازی‌های آنلاین و پلتفرم‌های گیمینگ',
+            'پایداری حداکثری و اولویت ترافیکی سرورها',
             'تک کاربره همزمان (ثبت آی‌پی هوشمند)',
           ],
           price1m: '۱۴۹,۰۰۰ تومان',
@@ -629,11 +631,11 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
         const SizedBox(height: 18),
         _buildPlanCard(
           tier: 'plus',
-          title: 'پلن PLUS (اقتصادی)',
+          title: 'پلن PLUS (ویژه گیمینگ)',
           features: [
-            'رفع تحریم وب‌سایت‌ها و استورها',
-            'پینگ بهینه با سرورهای اشتراکی',
-            'پشتیبانی لانچرهای استیم و اپیک',
+            'اختصاصی بازی‌های آنلاین و استورهای گیمینگ',
+            'پینگ بهینه و اتصال پایدار سرورهای بازی',
+            'پشتیبانی لانچرهای Steam, Epic Games, EA App, Riot',
           ],
           price1m: '۸۹,۰۰۰ تومان',
           price3m: '۲۶۷,۰۰۰ تومان',
@@ -1008,8 +1010,12 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
                       }
                     }
                   },
-                  style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFFF3B5C)),
-                  child: Text(otpSent ? 'تایید نهایی' : 'ارسال کد تایید'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF1E293B),
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                  ),
+                  child: const Text('تایید'),
                 ),
               ],
             ),
@@ -1279,50 +1285,86 @@ class _AuthModalSheetState extends State<AuthModalSheet> {
             _errorMsg = null;
           });
 
-          // 1. Initialize OAuth State with server
-          final stateNonce = 'app_${DateTime.now().millisecondsSinceEpoch}';
-          final initRes = await ApiService.initGoogleAuth(mode, stateNonce);
-          final state = initRes['state'] ?? stateNonce;
+          try {
+            // Native Google Sign-In with Play Services Dialog directly on Android!
+            final googleSignIn = GoogleSignIn(
+              scopes: ['email', 'profile', 'openid'],
+              serverClientId: '607759999989-rkpp4ovbl69o73vqaunhue5h4frainq7.apps.googleusercontent.com',
+            );
 
-          // 2. Launch Google OAuth directly in Google Account Picker window
-          final clientId = '607759999989-rkpp4ovbl69o73vqaunhue5h4frainq7.apps.googleusercontent.com';
-          final redirectUri = Uri.encodeComponent('https://ryzerdns.ir/auth/google/callback');
-          final scope = Uri.encodeComponent('email profile openid');
-          final googleUrl = Uri.parse(
-            'https://accounts.google.com/o/oauth2/v2/auth?client_id=$clientId&redirect_uri=$redirectUri&response_type=code&scope=$scope&prompt=select_account&state=$state',
-          );
+            final googleAccount = await googleSignIn.signIn();
+            if (googleAccount != null) {
+              final auth = await googleAccount.authentication;
+              final idToken = auth.idToken ?? auth.accessToken;
 
-          await launchUrl(googleUrl, mode: LaunchMode.externalApplication);
+              if (idToken != null) {
+                final authRes = await ApiService.authWithGoogleToken(
+                  token: idToken,
+                  mode: mode,
+                );
 
-          // 3. Poll in-app for completion without needing any web navigation
-          int attempts = 0;
-          Timer.periodic(const Duration(seconds: 2), (timer) async {
-            attempts++;
-            if (attempts > 60 || !mounted) {
-              timer.cancel();
-              if (mounted) setState(() => _isLoading = false);
-              return;
-            }
-
-            final pollRes = await ApiService.pollGoogleAuth(state);
-            if (pollRes['status'] == 'success' && pollRes['token'] != null) {
-              timer.cancel();
-              final prefs = await SharedPreferences.getInstance();
-              await prefs.setString('ryzer_user_token', pollRes['token']);
-              if (mounted) {
-                setState(() => _isLoading = false);
-                Navigator.pop(context);
-              }
-            } else if (pollRes['status'] == 'error') {
-              timer.cancel();
-              if (mounted) {
-                setState(() {
-                  _isLoading = false;
-                  _errorMsg = pollRes['message'] ?? 'خطا در احراز هویت گوگل';
-                });
+                if (authRes['success'] == true && authRes['token'] != null) {
+                  final prefs = await SharedPreferences.getInstance();
+                  await prefs.setString('ryzer_user_token', authRes['token']);
+                  if (mounted) {
+                    setState(() => _isLoading = false);
+                    Navigator.pop(context);
+                  }
+                  return;
+                } else {
+                  setState(() {
+                    _isLoading = false;
+                    _errorMsg = authRes['message'] ?? 'خطا در ورود با گوگل';
+                  });
+                  return;
+                }
               }
             }
-          });
+            setState(() => _isLoading = false);
+          } catch (e) {
+            // If device lacks Google Play Services, graceful fallback to lightweight browser
+            final stateNonce = 'app_${DateTime.now().millisecondsSinceEpoch}';
+            final initRes = await ApiService.initGoogleAuth(mode, stateNonce);
+            final state = initRes['state'] ?? stateNonce;
+
+            final clientId = '607759999989-rkpp4ovbl69o73vqaunhue5h4frainq7.apps.googleusercontent.com';
+            final redirectUri = Uri.encodeComponent('https://ryzerdns.ir/auth/google/callback');
+            final scope = Uri.encodeComponent('email profile openid');
+            final googleUrl = Uri.parse(
+              'https://accounts.google.com/o/oauth2/v2/auth?client_id=$clientId&redirect_uri=$redirectUri&response_type=code&scope=$scope&prompt=select_account&state=$state',
+            );
+
+            await launchUrl(googleUrl, mode: LaunchMode.externalApplication);
+
+            int attempts = 0;
+            Timer.periodic(const Duration(seconds: 2), (timer) async {
+              attempts++;
+              if (attempts > 60 || !mounted) {
+                timer.cancel();
+                if (mounted) setState(() => _isLoading = false);
+                return;
+              }
+
+              final pollRes = await ApiService.pollGoogleAuth(state);
+              if (pollRes['status'] == 'success' && pollRes['token'] != null) {
+                timer.cancel();
+                final prefs = await SharedPreferences.getInstance();
+                await prefs.setString('ryzer_user_token', pollRes['token']);
+                if (mounted) {
+                  setState(() => _isLoading = false);
+                  Navigator.pop(context);
+                }
+              } else if (pollRes['status'] == 'error') {
+                timer.cancel();
+                if (mounted) {
+                  setState(() {
+                    _isLoading = false;
+                    _errorMsg = pollRes['message'] ?? 'خطا در احراز هویت گوگل';
+                  });
+                }
+              }
+            });
+          }
         },
         style: OutlinedButton.styleFrom(
           side: const BorderSide(color: Color(0x33FFFFFF)),
