@@ -1288,9 +1288,12 @@ class _AuthModalSheetState extends State<AuthModalSheet> {
           try {
             // Native Google Sign-In with Play Services Dialog directly on Android!
             final googleSignIn = GoogleSignIn(
-              scopes: ['email', 'profile', 'openid'],
+              scopes: ['email', 'profile'],
               serverClientId: '607759999989-rkpp4ovbl69o73vqaunhue5h4frainq7.apps.googleusercontent.com',
             );
+
+            // Force sign out to ensure account chooser dialog always pops up
+            try { await googleSignIn.signOut(); } catch (_) {}
 
             final googleAccount = await googleSignIn.signIn();
             if (googleAccount != null) {
@@ -1322,47 +1325,9 @@ class _AuthModalSheetState extends State<AuthModalSheet> {
             }
             setState(() => _isLoading = false);
           } catch (e) {
-            // If device lacks Google Play Services, graceful fallback to lightweight browser
-            final stateNonce = 'app_${DateTime.now().millisecondsSinceEpoch}';
-            final initRes = await ApiService.initGoogleAuth(mode, stateNonce);
-            final state = initRes['state'] ?? stateNonce;
-
-            final clientId = '607759999989-rkpp4ovbl69o73vqaunhue5h4frainq7.apps.googleusercontent.com';
-            final redirectUri = Uri.encodeComponent('https://ryzerdns.ir/auth/google/callback');
-            final scope = Uri.encodeComponent('email profile openid');
-            final googleUrl = Uri.parse(
-              'https://accounts.google.com/o/oauth2/v2/auth?client_id=$clientId&redirect_uri=$redirectUri&response_type=code&scope=$scope&prompt=select_account&state=$state',
-            );
-
-            await launchUrl(googleUrl, mode: LaunchMode.externalApplication);
-
-            int attempts = 0;
-            Timer.periodic(const Duration(seconds: 2), (timer) async {
-              attempts++;
-              if (attempts > 60 || !mounted) {
-                timer.cancel();
-                if (mounted) setState(() => _isLoading = false);
-                return;
-              }
-
-              final pollRes = await ApiService.pollGoogleAuth(state);
-              if (pollRes['status'] == 'success' && pollRes['token'] != null) {
-                timer.cancel();
-                final prefs = await SharedPreferences.getInstance();
-                await prefs.setString('ryzer_user_token', pollRes['token']);
-                if (mounted) {
-                  setState(() => _isLoading = false);
-                  Navigator.pop(context);
-                }
-              } else if (pollRes['status'] == 'error') {
-                timer.cancel();
-                if (mounted) {
-                  setState(() {
-                    _isLoading = false;
-                    _errorMsg = pollRes['message'] ?? 'خطا در احراز هویت گوگل';
-                  });
-                }
-              }
+            setState(() {
+              _isLoading = false;
+              _errorMsg = 'خطا در اتصال به گوگل‌پلی: $e';
             });
           }
         },
