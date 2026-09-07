@@ -19,6 +19,24 @@ class MainActivity: FlutterActivity() {
 
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL).setMethodCallHandler { call, result ->
             when (call.method) {
+                "measureIcmpPing" -> {
+                    val host = call.argument<String>("host") ?: "87.248.145.40"
+                    Thread {
+                        try {
+                            val startTime = System.currentTimeMillis()
+                            val process = Runtime.getRuntime().exec("ping -c 1 -W 2 $host")
+                            val exitVal = process.waitFor()
+                            val elapsed = (System.currentTimeMillis() - startTime).toInt()
+                            if (exitVal == 0) {
+                                runOnUiThread { result.success(elapsed) }
+                            } else {
+                                runOnUiThread { result.success(-1) }
+                            }
+                        } catch (e: Exception) {
+                            runOnUiThread { result.success(-1) }
+                        }
+                    }.start()
+                }
                 "startVpn" -> {
                     targetPrimaryDns = call.argument<String>("primary_dns") ?: "87.248.145.40"
                     targetSecondaryDns = call.argument<String>("secondary_dns") ?: "46.8.102.223"

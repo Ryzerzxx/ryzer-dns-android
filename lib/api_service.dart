@@ -331,4 +331,43 @@ class ApiService {
       'update_available': false,
     };
   }
+
+  /// Initialize Google OAuth State for Android Client
+  static Future<Map<String, dynamic>> initGoogleAuth(String mode, String nonce) async {
+    try {
+      final response = await http.post(
+        Uri.parse('$baseUrl/api/auth/google/miniapp-init'),
+        headers: {
+          'Content-Type': 'application/json',
+          'User-Agent': userAgent,
+        },
+        body: jsonEncode({
+          'credential': 'android_app_init',
+          'mode': mode,
+          'ref_code': '',
+          'init_data': '',
+        }),
+      ).timeout(const Duration(seconds: 10));
+
+      final data = jsonDecode(utf8.decode(response.bodyBytes));
+      return data is Map<String, dynamic> ? data : {};
+    } catch (_) {
+      return {};
+    }
+  }
+
+  /// Poll Google Auth Completion
+  static Future<Map<String, dynamic>> pollGoogleAuth(String state) async {
+    try {
+      final response = await http.get(
+        Uri.parse('$baseUrl/api/auth/google/poll?state=${Uri.encodeComponent(state)}'),
+        headers: {'User-Agent': userAgent},
+      ).timeout(const Duration(seconds: 8));
+
+      final data = jsonDecode(utf8.decode(response.bodyBytes));
+      return data is Map<String, dynamic> ? data : {'status': 'pending'};
+    } catch (_) {
+      return {'status': 'pending'};
+    }
+  }
 }

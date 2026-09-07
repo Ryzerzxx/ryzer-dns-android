@@ -222,29 +222,53 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
 
   Widget _buildTopBar() {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
       decoration: const BoxDecoration(
         border: Border(bottom: BorderSide(color: Color(0x1AFFFFFF))),
       ),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        crossAxisAlignment: CrossAxisAlignment.center,
         children: [
           Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
             children: [
-              Image.asset('assets/nav-logo.png', height: 32, fit: BoxFit.contain),
-              const SizedBox(width: 8),
-              RichText(
-                text: const TextSpan(
-                  children: [
-                    TextSpan(
-                      text: 'RYZER',
-                      style: TextStyle(fontFamily: 'Syne', fontSize: 20, fontWeight: FontWeight.w900, color: Colors.white, letterSpacing: -0.5),
-                    ),
-                    TextSpan(
-                      text: 'DNS',
-                      style: TextStyle(fontFamily: 'Syne', fontSize: 20, fontWeight: FontWeight.w900, color: Color(0xFFFF3B5C), letterSpacing: -0.5),
-                    ),
-                  ],
+              Image.asset(
+                'assets/nav-logo.png',
+                height: 38,
+                width: 38,
+                fit: BoxFit.contain,
+              ),
+              const SizedBox(width: 10),
+              Padding(
+                padding: const EdgeInsets.only(top: 2),
+                child: RichText(
+                  text: const TextSpan(
+                    children: [
+                      TextSpan(
+                        text: 'RYZER',
+                        style: TextStyle(
+                          fontFamily: 'Syne',
+                          fontSize: 22,
+                          fontWeight: FontWeight.w900,
+                          color: Colors.white,
+                          letterSpacing: -0.5,
+                          height: 1.0,
+                        ),
+                      ),
+                      TextSpan(
+                        text: 'DNS',
+                        style: TextStyle(
+                          fontFamily: 'Syne',
+                          fontSize: 22,
+                          fontWeight: FontWeight.w900,
+                          color: Color(0xFFFF3B5C),
+                          letterSpacing: -0.5,
+                          height: 1.0,
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ),
             ],
@@ -1249,11 +1273,56 @@ class _AuthModalSheetState extends State<AuthModalSheet> {
       height: 44,
       child: OutlinedButton(
         onPressed: () async {
-          // Open web Google Auth flow directly in Chrome/Default browser
           final mode = _isLoginTab ? 'login' : 'register';
-          final url = Uri.parse('https://ryzerdns.ir/auth?mode=$mode');
-          await launchUrl(url, mode: LaunchMode.externalApplication);
-          if (mounted) Navigator.pop(context);
+          setState(() {
+            _isLoading = true;
+            _errorMsg = null;
+          });
+
+          // 1. Initialize OAuth State with server
+          final stateNonce = 'app_${DateTime.now().millisecondsSinceEpoch}';
+          final initRes = await ApiService.initGoogleAuth(mode, stateNonce);
+          final state = initRes['state'] ?? stateNonce;
+
+          // 2. Launch Google OAuth directly in Google Account Picker window
+          final clientId = '607759999989-rkpp4ovbl69o73vqaunhue5h4frainq7.apps.googleusercontent.com';
+          final redirectUri = Uri.encodeComponent('https://ryzerdns.ir/auth/google/callback');
+          final scope = Uri.encodeComponent('email profile openid');
+          final googleUrl = Uri.parse(
+            'https://accounts.google.com/o/oauth2/v2/auth?client_id=$clientId&redirect_uri=$redirectUri&response_type=code&scope=$scope&prompt=select_account&state=$state',
+          );
+
+          await launchUrl(googleUrl, mode: LaunchMode.externalApplication);
+
+          // 3. Poll in-app for completion without needing any web navigation
+          int attempts = 0;
+          Timer.periodic(const Duration(seconds: 2), (timer) async {
+            attempts++;
+            if (attempts > 60 || !mounted) {
+              timer.cancel();
+              if (mounted) setState(() => _isLoading = false);
+              return;
+            }
+
+            final pollRes = await ApiService.pollGoogleAuth(state);
+            if (pollRes['status'] == 'success' && pollRes['token'] != null) {
+              timer.cancel();
+              final prefs = await SharedPreferences.getInstance();
+              await prefs.setString('ryzer_user_token', pollRes['token']);
+              if (mounted) {
+                setState(() => _isLoading = false);
+                Navigator.pop(context);
+              }
+            } else if (pollRes['status'] == 'error') {
+              timer.cancel();
+              if (mounted) {
+                setState(() {
+                  _isLoading = false;
+                  _errorMsg = pollRes['message'] ?? 'خطا در احراز هویت گوگل';
+                });
+              }
+            }
+          });
         },
         style: OutlinedButton.styleFrom(
           side: const BorderSide(color: Color(0x33FFFFFF)),
