@@ -32,6 +32,8 @@
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="ryzerdns" android:host="auth" />
+                <data android:scheme="ryzerdns" android:host="ryzerdns.ir" />
+                <data android:scheme="ryzerdns" />
             </intent-filter>
         </activity>
 

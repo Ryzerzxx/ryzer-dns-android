@@ -261,6 +261,7 @@ class ApiService {
     required String token,
     required String planTier,
     required int durationMonths,
+    String source = 'app',
   }) async {
     try {
       final response = await http.post(
@@ -273,6 +274,7 @@ class ApiService {
           'token': token,
           'plan_tier': planTier.toLowerCase(),
           'duration_months': durationMonths,
+          'source': source,
         }),
       ).timeout(const Duration(seconds: 12));
 

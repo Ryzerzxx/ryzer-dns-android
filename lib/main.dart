@@ -175,6 +175,13 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
         ),
         backgroundColor: const Color(0xFF14141E),
         behavior: SnackBarBehavior.floating,
+        margin: EdgeInsets.only(
+          left: 20,
+          right: 20,
+          bottom: MediaQuery.of(context).viewInsets.bottom > 0
+              ? MediaQuery.of(context).viewInsets.bottom + 20
+              : 80,
+        ),
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(10),
           side: const BorderSide(color: Color(0xFFFF3B5C), width: 0.8),
@@ -241,11 +248,11 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
             children: [
               Image.asset(
                 'assets/nav-logo.png',
-                height: 38,
-                width: 38,
+                height: 44,
+                width: 44,
                 fit: BoxFit.contain,
               ),
-              const SizedBox(width: 10),
+              const SizedBox(width: 7),
               Padding(
                 padding: const EdgeInsets.only(top: 2),
                 child: RichText(
@@ -400,7 +407,7 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
                       border: Border.all(color: isExpired ? const Color(0xFFFF3B5C) : const Color(0xFF00E676)),
                     ),
                     child: Text(
-                      'پلن $tier',
+                      tier.toUpperCase(),
                       style: TextStyle(
                         fontFamily: 'Syne',
                         fontSize: 11,
@@ -520,7 +527,11 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
               const SizedBox(width: 6),
               InkWell(
                 onTap: _refreshPing,
-                child: const Icon(Icons.refresh, size: 16, color: Color(0xFFA0A0B0)),
+                borderRadius: BorderRadius.circular(16),
+                child: Container(
+                  padding: const EdgeInsets.all(8),
+                  child: const Icon(Icons.refresh_rounded, size: 20, color: Color(0xFFA0A0B0)),
+                ),
               ),
             ],
           ),
@@ -577,25 +588,30 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
     required String subtitle,
     required VoidCallback onTap,
   }) {
-    return InkWell(
-      onTap: onTap,
+    return Material(
+      color: const Color(0xFF0E0E14),
       borderRadius: BorderRadius.circular(12),
-      child: Container(
-        padding: const EdgeInsets.all(14),
-        decoration: BoxDecoration(
-          color: const Color(0xFF0E0E14),
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: const Color(0x1AFFFFFF)),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Icon(icon, color: const Color(0xFFFF3B5C), size: 22),
-            const SizedBox(height: 8),
-            Text(title, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w800, color: Colors.white)),
-            const SizedBox(height: 2),
-            Text(subtitle, style: const TextStyle(fontSize: 11, color: Color(0xFFA0A0B0))),
-          ],
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onTap,
+        splashColor: const Color(0x1AFF3B5C),
+        highlightColor: const Color(0x0DFF3B5C),
+        child: Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: const Color(0x1AFFFFFF)),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(icon, color: const Color(0xFFFF3B5C), size: 22),
+              const SizedBox(height: 8),
+              Text(title, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w800, color: Colors.white)),
+              const SizedBox(height: 2),
+              Text(subtitle, style: const TextStyle(fontSize: 11, color: Color(0xFFA0A0B0))),
+            ],
+          ),
         ),
       ),
     );
@@ -748,6 +764,12 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
       return;
     }
 
+    final feeText = 'کارمزد درگاه پرداخت: ۲,۰۰۰ تومان';
+    final rawAmountInt = tier.toLowerCase() == 'pro'
+        ? (months == 1 ? 149000 : 389000)
+        : (months == 1 ? 89000 : 239000);
+    final totalAmountText = '${(rawAmountInt + 2000).toString().replaceAllMapped(RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (Match m) => '${m[1]},')} تومان';
+
     final confirm = await showDialog<bool>(
       context: context,
       builder: (ctx) => Directionality(
@@ -755,21 +777,80 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
         child: AlertDialog(
           backgroundColor: const Color(0xFF0E0E14),
           shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(14),
+            borderRadius: BorderRadius.circular(16),
             side: const BorderSide(color: Color(0x33FFFFFF)),
           ),
-          title: const Text('تایید پیش‌فاکتور خرید', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: Colors.white)),
+          title: Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(6),
+                decoration: BoxDecoration(
+                  color: const Color(0x1AFF3B5C),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: const Icon(Icons.receipt_long_rounded, color: Color(0xFFFF3B5C), size: 18),
+              ),
+              const SizedBox(width: 8),
+              const Text('پیش‌فاکتور خرید اشتراک', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: Colors.white)),
+            ],
+          ),
           content: Column(
             mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text('پلن انتخابی: ${tier.toUpperCase()} ($months ماهه)', style: const TextStyle(fontSize: 13, color: Colors.white70)),
-              const SizedBox(height: 6),
-              Text('مبلغ اشتراک: $priceText', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: Color(0xFF00E676))),
+              Container(
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF14141E),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: const Color(0x1AFFFFFF)),
+                ),
+                child: Column(
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        const Text('پلن انتخابی', style: TextStyle(fontSize: 12, color: Color(0xFFA0A0B0))),
+                        Text(
+                          '${tier.toUpperCase()} ($months ماهه)',
+                          style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w800, color: Colors.white),
+                        ),
+                      ],
+                    ),
+                    const Divider(color: Color(0x1AFFFFFF), height: 20),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        const Text('مبلغ پلن', style: TextStyle(fontSize: 12, color: Color(0xFFA0A0B0))),
+                        Text(priceText, style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: Colors.white)),
+                      ],
+                    ),
+                    const SizedBox(height: 10),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        const Text('کارمزد درگاه پرداخت', style: TextStyle(fontSize: 12, color: Color(0xFFA0A0B0))),
+                        const Text('۲,۰۰۰ تومان', style: TextStyle(fontSize: 12, color: Color(0xFFA0A0B0))),
+                      ],
+                    ),
+                    const Divider(color: Color(0x33FFFFFF), height: 20),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        const Text('مبلغ قابل پرداخت', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800, color: Colors.white)),
+                        Text(
+                          totalAmountText,
+                          style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w900, color: Color(0xFF00E676)),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
               const SizedBox(height: 12),
               const Text(
-                'پس از تایید، به درگاه شاپرک زرین‌پال منتقل خواهید شد و اشتراک فوراً فعال می‌گردد.',
-                style: TextStyle(fontSize: 11.5, color: Color(0xFFA0A0B0), height: 1.6),
+                'پس از پرداخت در درگاه، اشتراک اکانت شما بلافاصله فعال می‌شود.',
+                style: TextStyle(fontSize: 11, color: Color(0xFFA0A0B0), height: 1.5),
+                textAlign: TextAlign.center,
               ),
             ],
           ),
@@ -799,6 +880,7 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
       token: _userToken!,
       planTier: tier,
       durationMonths: months,
+      source: 'app',
     );
 
     if (res['success'] == true && res['payment_url'] != null) {
@@ -890,23 +972,33 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
   }) {
     return Container(
       margin: const EdgeInsets.only(bottom: 10),
-      decoration: BoxDecoration(
+      child: Material(
         color: const Color(0xFF0E0E14),
         borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: const Color(0x1AFFFFFF)),
-      ),
-      child: ListTile(
-        leading: Icon(icon, color: const Color(0xFFFF3B5C), size: 20),
-        title: Text(title, style: const TextStyle(fontSize: 12, color: Color(0xFFA0A0B0))),
-        trailing: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(value, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: Colors.white)),
-            const SizedBox(width: 6),
-            const Icon(Icons.arrow_forward_ios, size: 12, color: Color(0x66FFFFFF)),
-          ],
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: onTap,
+          splashColor: const Color(0x1AFF3B5C),
+          highlightColor: const Color(0x0DFF3B5C),
+          child: Container(
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: const Color(0x1AFFFFFF)),
+            ),
+            child: ListTile(
+              leading: Icon(icon, color: const Color(0xFFFF3B5C), size: 20),
+              title: Text(title, style: const TextStyle(fontSize: 12, color: Color(0xFFA0A0B0))),
+              trailing: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(value, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: Colors.white)),
+                  const SizedBox(width: 6),
+                  const Icon(Icons.arrow_forward_ios, size: 12, color: Color(0x66FFFFFF)),
+                ],
+              ),
+            ),
+          ),
         ),
-        onTap: onTap,
       ),
     );
   }
@@ -916,6 +1008,7 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
     final otpController = TextEditingController();
     String? challengeId;
     bool otpSent = false;
+    String? dialogError;
 
     showDialog(
       context: context,
@@ -935,7 +1028,25 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
               ),
               content: Column(
                 mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  if (dialogError != null) ...[
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(10),
+                      margin: const EdgeInsets.only(bottom: 12),
+                      decoration: BoxDecoration(
+                        color: const Color(0x1AFF3B5C),
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: const Color(0xFFFF3B5C)),
+                      ),
+                      child: Text(
+                        dialogError!,
+                        style: const TextStyle(color: Color(0xFFFF3B5C), fontSize: 12, fontWeight: FontWeight.w700),
+                        textAlign: TextAlign.center,
+                      ),
+                    ),
+                  ],
                   if (!otpSent) ...[
                     TextField(
                       controller: textController,
@@ -959,6 +1070,13 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
                       style: const TextStyle(fontFamily: 'Syne', fontSize: 18, fontWeight: FontWeight.w800, letterSpacing: 4, color: Colors.white),
                       decoration: InputDecoration(
                         hintText: '123456',
+                        hintStyle: const TextStyle(
+                          color: Color(0x2EFFFFFF),
+                          fontFamily: 'Syne',
+                          fontSize: 18,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: 4,
+                        ),
                         filled: true,
                         fillColor: const Color(0xFF14141E),
                         border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none),
@@ -974,6 +1092,7 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
                 ),
                 ElevatedButton(
                   onPressed: () async {
+                    setDialogState(() => dialogError = null);
                     if (!otpSent) {
                       final val = textController.text.trim();
                       if (val.isEmpty) return;
@@ -992,11 +1111,14 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
                           setDialogState(() {
                             otpSent = true;
                             challengeId = res['challenge_id'];
+                            dialogError = null;
                           });
                           _showToast('کد تایید به ایمیل شما ارسال شد.');
                         }
                       } else {
-                        _showToast(res['message'] ?? 'خطا در ثبت درخواست.');
+                        setDialogState(() {
+                          dialogError = res['message'] ?? 'خطا در ثبت درخواست.';
+                        });
                       }
                     } else {
                       final otp = otpController.text.trim();
@@ -1011,7 +1133,9 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
                         _showToast('اطلاعات با موفقیت به‌روزرسانی شد.');
                         _refreshUserProfile();
                       } else {
-                        _showToast(res['message'] ?? 'کد تایید اشتباه است.');
+                        setDialogState(() {
+                          dialogError = res['message'] ?? 'کد تایید اشتباه است.';
+                        });
                       }
                     }
                   },
