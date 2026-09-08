@@ -764,11 +764,26 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
       return;
     }
 
-    final feeText = 'کارمزد درگاه پرداخت: ۲,۰۰۰ تومان';
-    final rawAmountInt = tier.toLowerCase() == 'pro'
-        ? (months == 1 ? 149000 : 389000)
-        : (months == 1 ? 89000 : 239000);
-    final totalAmountText = '${(rawAmountInt + 2000).toString().replaceAllMapped(RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (Match m) => '${m[1]},')} تومان';
+    // Exact official pricing and ZarinPal fees identical to website
+    final Map<String, Map<String, dynamic>> planDetails = {
+      'plus_1': {'base': 89000, 'fee': 945, 'total': 89945, 'dur': '۱ ماهه', 'title': 'Ryzer Plus'},
+      'plus_3': {'base': 267000, 'fee': 1835, 'total': 268835, 'dur': '۳ ماهه', 'title': 'Ryzer Plus'},
+      'pro_1': {'base': 149000, 'fee': 1245, 'total': 150245, 'dur': '۱ ماهه', 'title': 'Ryzer Pro'},
+      'pro_3': {'base': 447000, 'fee': 2735, 'total': 449735, 'dur': '۳ ماهه', 'title': 'Ryzer Pro'},
+    };
+
+    final planKey = '${tier.toLowerCase()}_$months';
+    final planInfo = planDetails[planKey] ?? {
+      'base': 0,
+      'fee': 0,
+      'total': 0,
+      'dur': '$months ماهه',
+      'title': 'Ryzer ${tier.toUpperCase()}'
+    };
+
+    final baseFormatted = '${(planInfo['base'] as int).toString().replaceAllMapped(RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (Match m) => '${m[1]},')} تومان';
+    final feeFormatted = '${(planInfo['fee'] as int).toString().replaceAllMapped(RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (Match m) => '${m[1]},')} تومان';
+    final totalFormatted = '${(planInfo['total'] as int).toString().replaceAllMapped(RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (Match m) => '${m[1]},')} تومان';
 
     final confirm = await showDialog<bool>(
       context: context,
@@ -811,7 +826,7 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
                       children: [
                         const Text('پلن انتخابی', style: TextStyle(fontSize: 12, color: Color(0xFFA0A0B0))),
                         Text(
-                          '${tier.toUpperCase()} ($months ماهه)',
+                          '${tier.toUpperCase()} (${planInfo['dur']})',
                           style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w800, color: Colors.white),
                         ),
                       ],
@@ -821,7 +836,7 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
                         const Text('مبلغ پلن', style: TextStyle(fontSize: 12, color: Color(0xFFA0A0B0))),
-                        Text(priceText, style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: Colors.white)),
+                        Text(baseFormatted, style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: Colors.white)),
                       ],
                     ),
                     const SizedBox(height: 10),
@@ -829,7 +844,7 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
                         const Text('کارمزد درگاه پرداخت', style: TextStyle(fontSize: 12, color: Color(0xFFA0A0B0))),
-                        const Text('۲,۰۰۰ تومان', style: TextStyle(fontSize: 12, color: Color(0xFFA0A0B0))),
+                        Text(feeFormatted, style: const TextStyle(fontSize: 12, color: Color(0xFFA0A0B0))),
                       ],
                     ),
                     const Divider(color: Color(0x33FFFFFF), height: 20),
@@ -838,7 +853,7 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
                       children: [
                         const Text('مبلغ قابل پرداخت', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800, color: Colors.white)),
                         Text(
-                          totalAmountText,
+                          totalFormatted,
                           style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w900, color: Color(0xFF00E676)),
                         ),
                       ],
