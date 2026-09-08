@@ -266,7 +266,11 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
               ),
               const SizedBox(width: 7),
               Padding(
-                padding: const EdgeInsets.only(top: 2),
+                padding: EdgeInsets.only(
+                  top: (_uiConfig['logo_top_padding'] is num)
+                      ? (_uiConfig['logo_top_padding'] as num).toDouble()
+                      : 0.0,
+                ),
                 child: RichText(
                   text: TextSpan(
                     children: [
