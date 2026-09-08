@@ -529,7 +529,9 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
                         ),
                         const SizedBox(height: 6),
                         Text(
-                          _isConnected ? 'متصل' : 'اتصال',
+                          _isConnected
+                              ? (_uiConfig['power_connected_text'] ?? 'متصل')
+                              : (_uiConfig['power_disconnected_text'] ?? 'اتصال'),
                           style: TextStyle(
                             fontSize: 15,
                             fontWeight: FontWeight.w900,
@@ -604,8 +606,8 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
         Expanded(
           child: _buildActionButton(
             icon: Icons.speed,
-            title: 'خرید اشتراک',
-            subtitle: 'پلن Pro و Plus',
+            title: _uiConfig['action_btn1_title'] ?? 'خرید اشتراک',
+            subtitle: _uiConfig['action_btn1_subtitle'] ?? 'پلن Pro و Plus',
             onTap: () => setState(() => _currentNavIndex = 1),
           ),
         ),
@@ -613,8 +615,8 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
         Expanded(
           child: _buildActionButton(
             icon: Icons.tune,
-            title: 'تنظیمات حساب',
-            subtitle: 'تغییر رمز و مشخصات',
+            title: _uiConfig['action_btn2_title'] ?? 'تنظیمات حساب',
+            subtitle: _uiConfig['action_btn2_subtitle'] ?? 'تغییر رمز و مشخصات',
             onTap: () => setState(() => _currentNavIndex = 2),
           ),
         ),
@@ -663,29 +665,29 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
   Widget _buildPlansTab() {
     final proCard = _buildPlanCard(
       tier: 'pro',
-      title: 'پلن PRO (نامحدود و کامل)',
-      features: [
+      title: _uiConfig['pro_plan_title'] ?? 'پلن PRO (نامحدود و کامل)',
+      features: (_uiConfig['pro_features'] as List?)?.map((e) => e.toString()).toList() ?? [
         'دسترسی به کل ۳۰,۰۰۰ دامنه تحریم‌شده بین‌المللی',
         'پشتیبانی کامل هوش مصنوعی (ChatGPT, Claude, Gemini)',
         'پشتیبانی کلیه بازی‌های آنلاین و پلتفرم‌های گیمینگ',
         'پایداری حداکثری و اولویت ترافیکی سرورها',
         'تک کاربره همزمان (ثبت آی‌پی هوشمند)',
       ],
-      price1m: '۱۴۹,۰۰۰ تومان',
-      price3m: '۴۴۷,۰۰۰ تومان',
+      price1m: _uiConfig['pro_price_1m'] ?? '۱۴۹,۰۰۰ تومان',
+      price3m: _uiConfig['pro_price_3m'] ?? '۴۴۷,۰۰۰ تومان',
       isPro: true,
     );
 
     final plusCard = _buildPlanCard(
       tier: 'plus',
-      title: 'پلن PLUS (ویژه گیمینگ)',
-      features: [
+      title: _uiConfig['plus_plan_title'] ?? 'پلن PLUS (ویژه گیمینگ)',
+      features: (_uiConfig['plus_features'] as List?)?.map((e) => e.toString()).toList() ?? [
         'اختصاصی بازی‌های آنلاین و استورهای گیمینگ',
         'پینگ بهینه و اتصال پایدار سرورهای بازی',
         'پشتیبانی لانچرهای Steam, Epic Games, EA App, Riot',
       ],
-      price1m: '۸۹,۰۰۰ تومان',
-      price3m: '۲۶۷,۰۰۰ تومان',
+      price1m: _uiConfig['plus_price_1m'] ?? '۸۹,۰۰۰ تومان',
+      price3m: _uiConfig['plus_price_3m'] ?? '۲۶۷,۰۰۰ تومان',
       isPro: false,
     );
 
@@ -1029,6 +1031,17 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
             }
           },
         ),
+        if (_uiConfig['show_support_in_settings'] == true) ...[
+          _buildSettingsItem(
+            icon: Icons.headset_mic_outlined,
+            title: 'پشتیبانی آنلاین',
+            value: _uiConfig['support_label'] ?? 'ارتباط با ما',
+            onTap: () {
+              final email = _uiConfig['support_email'] ?? 'info@ryzerdns.ir';
+              launchUrl(Uri.parse('mailto:$email'), mode: LaunchMode.externalApplication);
+            },
+          ),
+        ],
         const SizedBox(height: 24),
         const Text('عملیات حساب', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w800, color: Colors.white70)),
         const SizedBox(height: 10),
