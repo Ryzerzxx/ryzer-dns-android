@@ -60,6 +60,10 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
   late AnimationController _pulseController;
   int _currentNavIndex = 0; // 0: Home, 1: Plans, 2: Settings
 
+  // 🌐 Server-Driven UI & Remote Config State
+  Map<String, dynamic> _remoteConfig = {};
+  Map<String, dynamic> get _uiConfig => _remoteConfig['ui_config'] ?? {};
+
   @override
   void initState() {
     super.initState();
@@ -69,6 +73,14 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
     )..repeat(reverse: true);
 
     _loadStoredSession();
+    _fetchRemoteConfig();
+  }
+
+  Future<void> _fetchRemoteConfig() async {
+    final cfg = await ApiService.getRemoteConfig();
+    if (mounted && cfg.isNotEmpty) {
+      setState(() => _remoteConfig = cfg);
+    }
   }
 
   @override
@@ -256,11 +268,11 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
               Padding(
                 padding: const EdgeInsets.only(top: 2),
                 child: RichText(
-                  text: const TextSpan(
+                  text: TextSpan(
                     children: [
                       TextSpan(
-                        text: 'RYZER',
-                        style: TextStyle(
+                        text: _uiConfig['top_title_prefix'] ?? 'RYZER',
+                        style: const TextStyle(
                           fontFamily: 'Syne',
                           fontSize: 22,
                           fontWeight: FontWeight.w900,
@@ -270,8 +282,8 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
                         ),
                       ),
                       TextSpan(
-                        text: 'DNS',
-                        style: TextStyle(
+                        text: _uiConfig['top_title_suffix'] ?? 'DNS',
+                        style: const TextStyle(
                           fontFamily: 'Syne',
                           fontSize: 22,
                           fontWeight: FontWeight.w900,
@@ -335,6 +347,30 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
       child: Column(
         children: [
+          if (_uiConfig['enable_banner'] == true && (_uiConfig['banner_text'] ?? '').isNotEmpty) ...[
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              margin: const EdgeInsets.only(bottom: 16),
+              decoration: BoxDecoration(
+                color: const Color(0x1AFF3B5C),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: const Color(0xFFFF3B5C)),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.campaign_rounded, color: Color(0xFFFF3B5C), size: 20),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      _uiConfig['banner_text'] ?? '',
+                      style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: Colors.white),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
           _buildSubscriptionCard(),
           const SizedBox(height: 36),
           _buildPowerButton(),
@@ -548,7 +584,7 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
               ),
               const SizedBox(width: 8),
               Text(
-                _isConnected ? 'سرویس فعال' : 'سرویس غیرفعال',
+                _isConnected ? (_uiConfig['connected_status_text'] ?? 'سرویس فعال') : (_uiConfig['disconnected_status_text'] ?? 'سرویس غیرفعال'),
                 style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: Colors.white),
               ),
             ],
@@ -621,6 +657,47 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
   // 💎 TAB 2: PLANS & IN-APP PURCHASE
   // ══════════════════════════════════════════════════════════════════════════
   Widget _buildPlansTab() {
+    final proCard = _buildPlanCard(
+      tier: 'pro',
+      title: 'پلن PRO (نامحدود و کامل)',
+      features: [
+        'دسترسی به کل ۳۰,۰۰۰ دامنه تحریم‌شده بین‌المللی',
+        'پشتیبانی کامل هوش مصنوعی (ChatGPT, Claude, Gemini)',
+        'پشتیبانی کلیه بازی‌های آنلاین و پلتفرم‌های گیمینگ',
+        'پایداری حداکثری و اولویت ترافیکی سرورها',
+        'تک کاربره همزمان (ثبت آی‌پی هوشمند)',
+      ],
+      price1m: '۱۴۹,۰۰۰ تومان',
+      price3m: '۴۴۷,۰۰۰ تومان',
+      isPro: true,
+    );
+
+    final plusCard = _buildPlanCard(
+      tier: 'plus',
+      title: 'پلن PLUS (ویژه گیمینگ)',
+      features: [
+        'اختصاصی بازی‌های آنلاین و استورهای گیمینگ',
+        'پینگ بهینه و اتصال پایدار سرورهای بازی',
+        'پشتیبانی لانچرهای Steam, Epic Games, EA App, Riot',
+      ],
+      price1m: '۸۹,۰۰۰ تومان',
+      price3m: '۲۶۷,۰۰۰ تومان',
+      isPro: false,
+    );
+
+    final order = (_uiConfig['plans_order'] as List?)?.map((e) => e.toString().toLowerCase()).toList() ?? ['pro', 'plus'];
+    final cards = <Widget>[];
+    for (int i = 0; i < order.length; i++) {
+      if (order[i] == 'plus') {
+        cards.add(plusCard);
+      } else {
+        cards.add(proCard);
+      }
+      if (i < order.length - 1) {
+        cards.add(const SizedBox(height: 18));
+      }
+    }
+
     return ListView(
       physics: const BouncingScrollPhysics(),
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
@@ -635,33 +712,7 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
           style: TextStyle(fontSize: 12, color: Color(0xFFA0A0B0)),
         ),
         const SizedBox(height: 20),
-        _buildPlanCard(
-          tier: 'pro',
-          title: 'پلن PRO (نامحدود و کامل)',
-          features: [
-            'دسترسی به کل ۳۰,۰۰۰ دامنه تحریم‌شده بین‌المللی',
-            'پشتیبانی کامل هوش مصنوعی (ChatGPT, Claude, Gemini)',
-            'پشتیبانی کلیه بازی‌های آنلاین و پلتفرم‌های گیمینگ',
-            'پایداری حداکثری و اولویت ترافیکی سرورها',
-            'تک کاربره همزمان (ثبت آی‌پی هوشمند)',
-          ],
-          price1m: '۱۴۹,۰۰۰ تومان',
-          price3m: '۴۴۷,۰۰۰ تومان',
-          isPro: true,
-        ),
-        const SizedBox(height: 18),
-        _buildPlanCard(
-          tier: 'plus',
-          title: 'پلن PLUS (ویژه گیمینگ)',
-          features: [
-            'اختصاصی بازی‌های آنلاین و استورهای گیمینگ',
-            'پینگ بهینه و اتصال پایدار سرورهای بازی',
-            'پشتیبانی لانچرهای Steam, Epic Games, EA App, Riot',
-          ],
-          price1m: '۸۹,۰۰۰ تومان',
-          price3m: '۲۶۷,۰۰۰ تومان',
-          isPro: false,
-        ),
+        ...cards,
       ],
     );
   }
@@ -696,7 +747,7 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
                     color: const Color(0xFFFF3B5C),
                     borderRadius: BorderRadius.circular(6),
                   ),
-                  child: const Text('پیشنهادی', style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w800, color: Colors.white)),
+                  child: Text(_uiConfig['pro_badge_text'] ?? 'پیشنهادی', style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.w800, color: Colors.white)),
                 ),
             ],
           ),
