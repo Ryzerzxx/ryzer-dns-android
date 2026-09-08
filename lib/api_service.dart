@@ -124,8 +124,11 @@ class ApiService {
   static Future<Map<String, dynamic>> getProfile(String token) async {
     try {
       final response = await http.get(
-        Uri.parse('$baseUrl/api/user/profile?token=$token'),
-        headers: {'User-Agent': userAgent},
+        Uri.parse('$baseUrl/api/user/profile'),
+        headers: {
+          'Authorization': 'Bearer $token',
+          'User-Agent': userAgent,
+        },
       ).timeout(const Duration(seconds: 10));
 
       final data = jsonDecode(utf8.decode(response.bodyBytes));
@@ -315,7 +318,19 @@ class ApiService {
     }
   }
 
-  /// Get Remote App Config
+  /// Logout & Invalidate Server Session
+  static Future<void> logout(String token) async {
+    try {
+      await http.post(
+        Uri.parse('$baseUrl/api/user/logout'),
+        headers: {
+          'Content-Type': 'application/json',
+          'User-Agent': userAgent,
+        },
+        body: jsonEncode({'token': token}),
+      ).timeout(const Duration(seconds: 5));
+    } catch (_) {}
+  }
   static Future<Map<String, dynamic>> getRemoteConfig() async {
     try {
       final response = await http.get(

@@ -31,10 +31,15 @@ android {
 
     signingConfigs {
         create("release") {
-            storeFile = file("../keystores/release.jks")
-            storePassword = "RyzerDns2026@"
-            keyAlias = "ryzerkey"
-            keyPassword = "RyzerDns2026@"
+            val ksPath = System.getenv("KEYSTORE_PATH") ?: "../keystores/release.jks"
+            val ksPassword = System.getenv("KEYSTORE_PASSWORD") ?: "RyzerDns2026@"
+            val kAlias = System.getenv("KEY_ALIAS") ?: "ryzerkey"
+            val kPassword = System.getenv("KEY_PASSWORD") ?: "RyzerDns2026@"
+
+            storeFile = file(ksPath)
+            storePassword = ksPassword
+            keyAlias = kAlias
+            keyPassword = kPassword
         }
     }
 

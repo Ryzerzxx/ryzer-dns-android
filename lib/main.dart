@@ -950,8 +950,17 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
     );
 
     if (res['success'] == true && res['payment_url'] != null) {
-      final url = Uri.parse(res['payment_url']);
-      await launchUrl(url, mode: LaunchMode.externalApplication);
+      final rawUrl = res['payment_url'].toString().trim();
+      final uri = Uri.tryParse(rawUrl);
+      if (uri != null && uri.isScheme('https')) {
+        final host = uri.host.toLowerCase();
+        // Strict whitelist: Only allow trusted payment gateways (ZarinPal, Shaparak, RyzerDNS)
+        if (host.endsWith('zarinpal.com') || host.endsWith('shaparak.ir') || host.endsWith('ryzerdns.ir')) {
+          await launchUrl(uri, mode: LaunchMode.externalApplication);
+          return;
+        }
+      }
+      _showToast('درگاه پرداخت نامعتبر یا ناامن شناسایی شد.');
     } else {
       _showToast(res['message'] ?? 'خطا در ایجاد درگاه پرداخت.');
     }
@@ -1221,6 +1230,10 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
   }
 
   Future<void> _handleLogout() async {
+    if (_userToken != null) {
+      // Invalidate on server
+      ApiService.logout(_userToken!);
+    }
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove('ryzer_user_token');
     await VpnManager.stopVpn();
