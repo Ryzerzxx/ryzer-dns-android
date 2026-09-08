@@ -80,7 +80,132 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
     final cfg = await ApiService.getRemoteConfig();
     if (mounted && cfg.isNotEmpty) {
       setState(() => _remoteConfig = cfg);
+      _checkAndPromptUpdate(cfg);
     }
+  }
+
+  void _checkAndPromptUpdate(Map<String, dynamic> cfg) {
+    const currentAppVersion = "2.0.0";
+    final latestVersion = cfg['latest_version'] ?? currentAppVersion;
+    final updateAvailable = cfg['update_available'] == true || latestVersion != currentAppVersion;
+    final minRequired = cfg['min_required_version'] ?? currentAppVersion;
+    final isForceUpdate = minRequired != currentAppVersion && _isVersionLower(currentAppVersion, minRequired);
+
+    if (updateAvailable) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _showUpdateDialog(
+          latestVersion: latestVersion,
+          updateUrl: cfg['update_url'] ?? 'https://ryzerdns.ir/static/download/RyzerDNS_v2.apk',
+          changelog: cfg['changelog'] ?? 'بهبود پایداری شبکه و رفع خطاهای اتصال.',
+          isForce: isForceUpdate,
+        );
+      });
+    }
+  }
+
+  bool _isVersionLower(String current, String target) {
+    try {
+      final cParts = current.split('.').map(int.parse).toList();
+      final tParts = target.split('.').map(int.parse).toList();
+      for (int i = 0; i < cParts.length && i < tParts.length; i++) {
+        if (cParts[i] < tParts[i]) return true;
+        if (cParts[i] > tParts[i]) return false;
+      }
+    } catch (_) {}
+    return false;
+  }
+
+  void _showUpdateDialog({
+    required String latestVersion,
+    required String updateUrl,
+    required String changelog,
+    required bool isForce,
+  }) {
+    showDialog(
+      context: context,
+      barrierDismissible: !isForce,
+      builder: (ctx) => WillPopScope(
+        onWillPop: () async => !isForce,
+        child: Directionality(
+          textDirection: TextDirection.rtl,
+          child: AlertDialog(
+            backgroundColor: const Color(0xFF0E0E14),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(16),
+              side: const BorderSide(color: Color(0xFFFF3B5C), width: 1.2),
+            ),
+            title: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: const Color(0x1AFF3B5C),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: const Icon(Icons.system_update_rounded, color: Color(0xFFFF3B5C), size: 22),
+                ),
+                const SizedBox(width: 10),
+                Text(
+                  'نسخه جدید منتشر شد ($latestVersion)',
+                  style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: Colors.white),
+                ),
+              ],
+            ),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'برای دسترسی به آخرین بهینه‌سازی‌ها و پایداری سرورها، نسخه جدید را نصب فرمایید.',
+                  style: TextStyle(fontSize: 12.5, color: Color(0xFFA0A0B0), height: 1.6),
+                ),
+                const SizedBox(height: 12),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF14141E),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: const Color(0x1AFFFFFF)),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text('تغییرات این نسخه:', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: Colors.white70)),
+                      const SizedBox(height: 6),
+                      Text(changelog, style: const TextStyle(fontSize: 12, color: Color(0xFFD0D0E0), height: 1.5)),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            actions: [
+              if (!isForce)
+                TextButton(
+                  onPressed: () => Navigator.pop(ctx),
+                  child: const Text('بعداً', style: TextStyle(color: Colors.white54)),
+                ),
+              ElevatedButton.icon(
+                onPressed: () async {
+                  final uri = Uri.tryParse(updateUrl);
+                  if (uri != null) {
+                    await launchUrl(uri, mode: LaunchMode.externalApplication);
+                  }
+                },
+                icon: const Icon(Icons.download_rounded, size: 18),
+                label: const Text('دانلود و نصب نسخه جدید'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFFFF3B5C),
+                  foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   @override
