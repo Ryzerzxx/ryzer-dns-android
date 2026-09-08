@@ -272,9 +272,11 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
                     children: [
                       TextSpan(
                         text: _uiConfig['top_title_prefix'] ?? 'RYZER',
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontFamily: 'Syne',
-                          fontSize: 22,
+                          fontSize: (_uiConfig['logo_font_size'] is num)
+                              ? (_uiConfig['logo_font_size'] as num).toDouble()
+                              : 19.0,
                           fontWeight: FontWeight.w900,
                           color: Colors.white,
                           letterSpacing: -0.5,
@@ -283,11 +285,13 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
                       ),
                       TextSpan(
                         text: _uiConfig['top_title_suffix'] ?? 'DNS',
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontFamily: 'Syne',
-                          fontSize: 22,
+                          fontSize: (_uiConfig['logo_font_size'] is num)
+                              ? (_uiConfig['logo_font_size'] as num).toDouble()
+                              : 19.0,
                           fontWeight: FontWeight.w900,
-                          color: Color(0xFFFF3B5C),
+                          color: const Color(0xFFFF3B5C),
                           letterSpacing: -0.5,
                           height: 1.0,
                         ),
