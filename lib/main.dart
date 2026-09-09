@@ -103,7 +103,7 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
       WidgetsBinding.instance.addPostFrameCallback((_) {
         _showUpdateDialog(
           latestVersion: latestVersion,
-          updateUrl: cfg['update_url'] ?? 'https://ryzerdns.ir/static/download/RyzerDNS_v2.apk',
+          updateUrl: cfg['update_url'] ?? 'https://ryzerdns.ir/static/download/RyzerDNS_v1.apk',
           changelog: cfg['changelog'] ?? 'بهبود پایداری شبکه و رفع خطاهای اتصال.',
           isForce: isForceUpdate,
         );
@@ -1089,6 +1089,37 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
     );
 
     if (confirm != true) return;
+
+    // Check if client is running as Bazaar variant or fallback
+    final sku = '${tier.toLowerCase()}_${months}m';
+    try {
+      const bazaarChannel = MethodChannel('ir.ryzerdns/bazaar_billing');
+      _showToast('در حال اتصال به کافه‌بازار...');
+      final dynamic buyRes = await bazaarChannel.invokeMethod('purchaseSku', {
+        'sku': sku,
+        'payload': _userToken!,
+      });
+      
+      if (buyRes is Map && buyRes['status'] == 'success') {
+        final purchaseToken = buyRes['purchaseToken']?.toString() ?? '';
+        _showToast('تراکنش با موفقیت انجام شد، در حال ثبت اشتراک...');
+        final valRes = await ApiService.verifyBazaarPurchase(
+          token: _userToken!,
+          sku: sku,
+          purchaseToken: purchaseToken,
+        );
+        if (valRes['success'] == true) {
+          _showToast('اشتراک شما با موفقیت فعال شد!');
+          _refreshUserProfile();
+          return;
+        } else {
+          _showToast(valRes['message'] ?? 'خطا در ثبت نهایی اشتراک بازار');
+          return;
+        }
+      }
+    } catch (e) {
+      // If Bazaar is not installed or error, fallback to Direct Web/Zarinpal
+    }
 
     _showToast('در حال صدور فاکتور و اتصال به درگاه...');
     final res = await ApiService.requestPayment(

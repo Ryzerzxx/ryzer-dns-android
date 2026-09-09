@@ -507,4 +507,30 @@ class ApiService {
       return {'status': 'error', 'detail': 'خطا در برقراری ارتباط با سرور'};
     }
   }
+
+  /// Cafe Bazaar Server-side verification
+  static Future<Map<String, dynamic>> verifyBazaarPurchase({
+    required String token,
+    required String sku,
+    required String purchaseToken,
+  }) async {
+    try {
+      final response = await http.post(
+        Uri.parse('$baseUrl/api/payment/bazaar/verify'),
+        headers: {
+          'Content-Type': 'application/json',
+          'User-Agent': userAgent,
+        },
+        body: jsonEncode({
+          'token': token,
+          'sku': sku,
+          'purchase_token': purchaseToken,
+        }),
+      ).timeout(const Duration(seconds: 15));
+
+      return jsonDecode(utf8.decode(response.bodyBytes));
+    } catch (e) {
+      return {'success': false, 'message': 'خطا در تایید تراکنش با سرور'};
+    }
+  }
 }

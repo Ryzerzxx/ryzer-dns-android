@@ -56,6 +56,10 @@ kotlin {
     }
 }
 
+dependencies {
+    implementation("com.github.cafebazaar.Poolakey:poolakey:2.2.0")
+}
+
 flutter {
     source = "../.."
 }
