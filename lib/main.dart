@@ -1656,11 +1656,12 @@ class _AuthModalSheetState extends State<AuthModalSheet> {
             final googleAccount = await googleSignIn.signIn();
             if (googleAccount != null) {
               final auth = await googleAccount.authentication;
-              final idToken = auth.idToken ?? auth.accessToken;
+              // Prioritize idToken (standard JWT containing aud/client_id)
+              final tokenToVerify = auth.idToken ?? auth.accessToken;
 
-              if (idToken != null) {
+              if (tokenToVerify != null) {
                 final authRes = await ApiService.authWithGoogleToken(
-                  token: idToken,
+                  token: tokenToVerify,
                   mode: mode,
                 );
 
