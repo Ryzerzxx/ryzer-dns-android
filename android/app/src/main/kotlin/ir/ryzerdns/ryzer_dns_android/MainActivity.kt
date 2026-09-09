@@ -3,7 +3,7 @@ package ir.ryzerdns.ryzer_dns_android
 import android.content.Intent
 import android.net.VpnService
 import androidx.annotation.NonNull
-import io.flutter.embedding.android.FlutterActivity
+import io.flutter.embedding.android.FlutterFragmentActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 import ir.cafebazaar.poolakey.Connection
@@ -13,7 +13,7 @@ import ir.cafebazaar.poolakey.config.PaymentConfiguration
 import ir.cafebazaar.poolakey.config.SecurityCheck
 import ir.cafebazaar.poolakey.request.PurchaseRequest
 
-class MainActivity: FlutterActivity() {
+class MainActivity: FlutterFragmentActivity() {
     private val CHANNEL = "ir.ryzerdns/vpn"
     private val BAZAAR_CHANNEL = "ir.ryzerdns/bazaar_billing"
     private val VPN_REQUEST_CODE = 2026
