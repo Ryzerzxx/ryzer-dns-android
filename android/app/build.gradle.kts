@@ -29,6 +29,10 @@ android {
         versionName = flutter.versionName
     }
 
+    buildFeatures {
+        aidl = true
+    }
+
     signingConfigs {
         create("release") {
             val ksPath = System.getenv("KEYSTORE_PATH") ?: "../keystores/release.jks"
