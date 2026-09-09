@@ -425,4 +425,86 @@ class ApiService {
       return {'status': 'pending'};
     }
   }
+
+  /// Support Tickets & Messages API
+  static Future<List<dynamic>> getTicketsList(String token) async {
+    try {
+      final response = await http.get(
+        Uri.parse('$baseUrl/api/user/messages/list?token=${Uri.encodeComponent(token)}'),
+        headers: {'User-Agent': userAgent},
+      ).timeout(const Duration(seconds: 10));
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(utf8.decode(response.bodyBytes));
+        if (data is List) return data;
+      }
+    } catch (_) {}
+    return [];
+  }
+
+  static Future<Map<String, dynamic>> getTicketHistory(String token, int ticketId) async {
+    try {
+      final response = await http.get(
+        Uri.parse('$baseUrl/api/user/messages/history?token=${Uri.encodeComponent(token)}&ticket_id=$ticketId'),
+        headers: {'User-Agent': userAgent},
+      ).timeout(const Duration(seconds: 10));
+
+      if (response.statusCode == 200) {
+        return jsonDecode(utf8.decode(response.bodyBytes));
+      }
+    } catch (_) {}
+    return {};
+  }
+
+  static Future<Map<String, dynamic>> submitTicket({
+    required String token,
+    required String category,
+    required String subject,
+    required String message,
+  }) async {
+    try {
+      final response = await http.post(
+        Uri.parse('$baseUrl/api/user/messages/submit'),
+        headers: {
+          'Content-Type': 'application/json',
+          'User-Agent': userAgent,
+        },
+        body: jsonEncode({
+          'token': token,
+          'category': category,
+          'subject': subject,
+          'message': message,
+        }),
+      ).timeout(const Duration(seconds: 12));
+
+      return jsonDecode(utf8.decode(response.bodyBytes));
+    } catch (e) {
+      return {'status': 'error', 'detail': 'خطا در برقراری ارتباط با سرور'};
+    }
+  }
+
+  static Future<Map<String, dynamic>> replyTicket({
+    required String token,
+    required int ticketId,
+    required String message,
+  }) async {
+    try {
+      final response = await http.post(
+        Uri.parse('$baseUrl/api/user/messages/reply'),
+        headers: {
+          'Content-Type': 'application/json',
+          'User-Agent': userAgent,
+        },
+        body: jsonEncode({
+          'token': token,
+          'ticket_id': ticketId,
+          'message': message,
+        }),
+      ).timeout(const Duration(seconds: 12));
+
+      return jsonDecode(utf8.decode(response.bodyBytes));
+    } catch (e) {
+      return {'status': 'error', 'detail': 'خطا در برقراری ارتباط با سرور'};
+    }
+  }
 }

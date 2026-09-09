@@ -74,6 +74,7 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
 
     _loadStoredSession();
     _fetchRemoteConfig();
+    _loadTickets();
   }
 
   Future<void> _fetchRemoteConfig() async {
@@ -224,6 +225,7 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
       await _refreshUserProfile();
       // Auto-register device IP silently on startup!
       ApiService.registerIp(token);
+      _loadTickets();
     }
     _refreshPing();
     _pingTimer = Timer.periodic(const Duration(seconds: 15), (_) {
@@ -358,6 +360,7 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
                   children: [
                     _buildHomeTab(),
                     _buildPlansTab(),
+                    _buildSupportTab(),
                     _buildSettingsTab(),
                   ],
                 ),
@@ -1106,7 +1109,465 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
   }
 
   // ══════════════════════════════════════════════════════════════════════════
-  // ⚙️ TAB 3: ACCOUNT & SETTINGS
+  // 💬 TAB 3: SUPPORT, TICKETS & DOMAIN REQUESTS (Mirrors Website Perfectly)
+  // ══════════════════════════════════════════════════════════════════════════
+  int _supportCategoryIndex = 0; // 0: تیکت, 1: فیدبک, 2: درخواست دامنه
+  final _ticketSubjectCtrl = TextEditingController();
+  final _ticketMessageCtrl = TextEditingController();
+  bool _isSubmittingTicket = false;
+  List<dynamic> _myTickets = [];
+  bool _isLoadingTickets = false;
+
+  void _loadTickets() async {
+    if (_userToken == null) return;
+    setState(() => _isLoadingTickets = true);
+    final tickets = await ApiService.getTicketsList(_userToken!);
+    if (mounted) {
+      setState(() {
+        _myTickets = tickets;
+        _isLoadingTickets = false;
+      });
+    }
+  }
+
+  void _submitTicket() async {
+    if (_userToken == null) {
+      _showToast('لطفاً ابتدا وارد حساب کاربری شوید.');
+      return;
+    }
+    final msg = _ticketMessageCtrl.text.trim();
+    if (msg.isEmpty) {
+      _showToast('متن پیام نمی‌تواند خالی باشد.');
+      return;
+    }
+    final categories = ['تیکت', 'فیدبک', 'درخواست دامنه'];
+    final category = categories[_supportCategoryIndex];
+    final subject = _ticketSubjectCtrl.text.trim().isEmpty ? category : _ticketSubjectCtrl.text.trim();
+
+    setState(() => _isSubmittingTicket = true);
+    final res = await ApiService.submitTicket(
+      token: _userToken!,
+      category: category,
+      subject: subject,
+      message: msg,
+    );
+    setState(() => _isSubmittingTicket = false);
+
+    if (res['status'] == 'success') {
+      _ticketSubjectCtrl.clear();
+      _ticketMessageCtrl.clear();
+      _showToast('تیکت شما با موفقیت ثبت شد و کد پیگیری صادر گردید.');
+      _loadTickets();
+    } else {
+      _showToast(res['detail'] ?? 'خطا در ثبت پیام');
+    }
+  }
+
+  void _showTicketChatDialog(int ticketId, String subject) async {
+    if (_userToken == null) return;
+    final replyCtrl = TextEditingController();
+    bool isReplying = false;
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: const Color(0xFF0C0C12),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        side: BorderSide(color: Color(0x33FFFFFF)),
+      ),
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setModalState) {
+          return FutureBuilder<Map<String, dynamic>>(
+            future: ApiService.getTicketHistory(_userToken!, ticketId),
+            builder: (context, snapshot) {
+              final data = snapshot.data;
+              final messages = (data?['messages'] as List?) ?? [];
+              final ticket = data?['ticket'] as Map<String, dynamic>?;
+              final status = ticket?['status'] ?? 'open';
+
+              return Padding(
+                padding: EdgeInsets.only(
+                  bottom: MediaQuery.of(ctx).viewInsets.bottom + 20,
+                  left: 18,
+                  right: 18,
+                  top: 18,
+                ),
+                child: SizedBox(
+                  height: MediaQuery.of(ctx).size.height * 0.75,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          IconButton(
+                            icon: const Icon(Icons.close, color: Colors.white70),
+                            onPressed: () => Navigator.pop(ctx),
+                          ),
+                          Expanded(
+                            child: Text(
+                              'پیگیری تیکت #$ticketId ($subject)',
+                              textAlign: TextAlign.center,
+                              style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13, color: Colors.white),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                            decoration: BoxDecoration(
+                              color: status == 'open' ? const Color(0x26FFAB00) : const Color(0x2600E676),
+                              borderRadius: BorderRadius.circular(6),
+                              border: Border.all(color: status == 'open' ? const Color(0xFFFFAB00) : const Color(0xFF00E676)),
+                            ),
+                            child: Text(
+                              status == 'open' ? 'در انتظار بررسی' : 'پاسخ داده شد',
+                              style: TextStyle(
+                                fontSize: 10,
+                                fontWeight: FontWeight.w800,
+                                color: status == 'open' ? const Color(0xFFFFAB00) : const Color(0xFF00E676),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const Divider(color: Color(0x1AFFFFFF), height: 24),
+                      Expanded(
+                        child: snapshot.connectionState == ConnectionState.waiting
+                            ? const Center(child: CircularProgressIndicator(color: Color(0xFFFF3B5C)))
+                            : messages.isEmpty
+                                ? const Center(child: Text('پیامی یافت نشد.', style: TextStyle(color: Colors.white54)))
+                                : ListView.builder(
+                                    reverse: false,
+                                    itemCount: messages.length,
+                                    itemBuilder: (context, idx) {
+                                      final m = messages[idx];
+                                      final isUser = m['sender_type'] == 'user';
+                                      return Align(
+                                        alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
+                                        child: Container(
+                                          margin: const EdgeInsets.symmetric(vertical: 6),
+                                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                                          constraints: BoxConstraints(maxWidth: MediaQuery.of(ctx).size.width * 0.8),
+                                          decoration: BoxDecoration(
+                                            color: isUser ? const Color(0x26FF3B5C) : const Color(0xFF1E1E2A),
+                                            borderRadius: BorderRadius.circular(12),
+                                            border: Border.all(
+                                              color: isUser ? const Color(0x4DFF3B5C) : const Color(0x33FFFFFF),
+                                            ),
+                                          ),
+                                          child: Column(
+                                            crossAxisAlignment: isUser ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+                                            children: [
+                                              Text(
+                                                isUser ? (m['sender_name'] ?? 'شما') : 'پشتیبانی فنی Ryzer',
+                                                style: TextStyle(
+                                                  fontSize: 11,
+                                                  fontWeight: FontWeight.w800,
+                                                  color: isUser ? const Color(0xFFFF8595) : const Color(0xFF00E676),
+                                                ),
+                                              ),
+                                              const SizedBox(height: 4),
+                                              Text(
+                                                m['message'] ?? '',
+                                                style: const TextStyle(fontSize: 12.5, color: Colors.white, height: 1.5),
+                                              ),
+                                              const SizedBox(height: 4),
+                                              Text(
+                                                (m['created_at'] ?? '').toString().replaceFirst('T', ' ').split('.')[0],
+                                                style: const TextStyle(fontSize: 9.5, color: Colors.white38),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                      );
+                                    },
+                                  ),
+                      ),
+                      const SizedBox(height: 12),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: TextField(
+                              controller: replyCtrl,
+                              style: const TextStyle(color: Colors.white, fontSize: 13),
+                              decoration: InputDecoration(
+                                hintText: 'ارسال پاسخ یا پیام تکمیلی...',
+                                hintStyle: const TextStyle(color: Colors.white38, fontSize: 12),
+                                filled: true,
+                                fillColor: const Color(0xFF14141E),
+                                contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                                border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          isReplying
+                              ? const SizedBox(width: 32, height: 32, child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFFFF3B5C)))
+                              : IconButton(
+                                  icon: const Icon(Icons.send_rounded, color: Color(0xFFFF3B5C)),
+                                  onPressed: () async {
+                                    final text = replyCtrl.text.trim();
+                                    if (text.isEmpty) return;
+                                    setModalState(() => isReplying = true);
+                                    final res = await ApiService.replyTicket(token: _userToken!, ticketId: ticketId, message: text);
+                                    setModalState(() => isReplying = false);
+                                    if (res['status'] == 'success') {
+                                      replyCtrl.clear();
+                                      setModalState(() {});
+                                      _loadTickets();
+                                    } else {
+                                      _showToast(res['detail'] ?? 'خطا در ارسال پاسخ');
+                                    }
+                                  },
+                                ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            },
+          );
+        },
+      ),
+    );
+  }
+
+  void _showTicketsModal() {
+    setState(() => _currentNavIndex = 2); // Switch to support tab
+  }
+
+  Widget _buildSupportTab() {
+    if (_userToken == null) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Icon(Icons.support_agent_outlined, size: 52, color: Color(0xFFA0A0B0)),
+            const SizedBox(height: 14),
+            const Text('جهت ارسال تیکت و پیگیری پیام‌ها وارد حساب شوید.', style: TextStyle(fontSize: 13, color: Colors.white70)),
+            const SizedBox(height: 16),
+            ElevatedButton(
+              onPressed: _showAuthModal,
+              style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFFF3B5C)),
+              child: const Text('ورود به حساب کاربری'),
+            ),
+          ],
+        ),
+      );
+    }
+
+    final categories = ['ارسال تیکت پشتیبانی', 'ارسال نظر و فیدبک', 'درخواست افزودن دامنه'];
+
+    return RefreshIndicator(
+      onRefresh: () async => _loadTickets(),
+      color: const Color(0xFFFF3B5C),
+      child: ListView(
+        physics: const AlwaysScrollableScrollPhysics(parent: BouncingScrollPhysics()),
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+        children: [
+          const Text('مرکز پشتیبانی و ارتباط مستقیم', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900, color: Colors.white)),
+          const SizedBox(height: 4),
+          const Text('پیام‌ها مستقیماً با سایت، ربات تلگرام و تیم پشتیبانی همگام است', style: TextStyle(fontSize: 11.5, color: Color(0xFFA0A0B0))),
+          const SizedBox(height: 16),
+
+          // Categories Tabs (Mirrors Web)
+          Container(
+            padding: const EdgeInsets.all(4),
+            decoration: BoxDecoration(
+              color: const Color(0xFF0E0E14),
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: const Color(0x1AFFFFFF)),
+            ),
+            child: Row(
+              children: List.generate(categories.length, (idx) {
+                final isSelected = _supportCategoryIndex == idx;
+                return Expanded(
+                  child: GestureDetector(
+                    onTap: () => setState(() => _supportCategoryIndex = idx),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(vertical: 8),
+                      decoration: BoxDecoration(
+                        color: isSelected ? const Color(0xFFFF3B5C) : Colors.transparent,
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Text(
+                        categories[idx],
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          fontSize: 10.5,
+                          fontWeight: isSelected ? FontWeight.w900 : FontWeight.w600,
+                          color: isSelected ? Colors.white : Colors.white60,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ),
+                );
+              }),
+            ),
+          ),
+          const SizedBox(height: 14),
+
+          // New Ticket Box
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: const Color(0xFF0E0E14),
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: const Color(0x1AFFFFFF)),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                if (_supportCategoryIndex == 0) ...[
+                  TextField(
+                    controller: _ticketSubjectCtrl,
+                    style: const TextStyle(color: Colors.white, fontSize: 13),
+                    decoration: InputDecoration(
+                      hintText: 'موضوع تیکت (مثال: مشکل در اتصال به FC 26)',
+                      hintStyle: const TextStyle(color: Colors.white38, fontSize: 12),
+                      filled: true,
+                      fillColor: const Color(0xFF14141E),
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none),
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                ],
+                TextField(
+                  controller: _ticketMessageCtrl,
+                  maxLines: 4,
+                  style: const TextStyle(color: Colors.white, fontSize: 13),
+                  decoration: InputDecoration(
+                    hintText: _supportCategoryIndex == 2
+                        ? 'آدرس دامنه یا نام بازی مورد نظر جهت رفع تحریم را بنویسید...'
+                        : _supportCategoryIndex == 1
+                            ? 'پیشنهاد، نظر یا انتقاد خود را برای بهبود سرویس بنویسید...'
+                            : 'توضیحات کامل مشکل خود، نوع کنسول/سیستم و اپراتور اینترنت را بنویسید...',
+                    hintStyle: const TextStyle(color: Colors.white38, fontSize: 12),
+                    filled: true,
+                    fillColor: const Color(0xFF14141E),
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none),
+                    contentPadding: const EdgeInsets.all(12),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                SizedBox(
+                  height: 42,
+                  child: ElevatedButton(
+                    onPressed: _isSubmittingTicket ? null : _submitTicket,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFFFF3B5C),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                    ),
+                    child: _isSubmittingTicket
+                        ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                        : const Text('ارسال و دریافت کد پیگیری', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 13)),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 24),
+
+          // Tickets History Section
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Text('تیکت‌ها و درخواست‌های من', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w800, color: Colors.white)),
+              TextButton.icon(
+                onPressed: _loadTickets,
+                icon: const Icon(Icons.refresh, size: 14, color: Color(0xFFFF3B5C)),
+                label: const Text('بروزرسانی', style: TextStyle(fontSize: 11, color: Color(0xFFFF3B5C))),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+
+          if (_isLoadingTickets)
+            const Center(child: Padding(padding: EdgeInsets.all(20), child: CircularProgressIndicator(color: Color(0xFFFF3B5C))))
+          else if (_myTickets.isEmpty)
+            Container(
+              padding: const EdgeInsets.all(20),
+              decoration: BoxDecoration(
+                color: const Color(0xFF0E0E14),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: const Color(0x1AFFFFFF)),
+              ),
+              child: const Center(
+                child: Text('تاکنون تیکت یا درخواستی ثبت نکرده‌اید.', style: TextStyle(color: Colors.white54, fontSize: 12)),
+              ),
+            )
+          else
+            ..._myTickets.map((t) {
+              final status = t['status'] ?? 'open';
+              final isAnswered = status != 'open';
+              return Container(
+                margin: const EdgeInsets.only(bottom: 10),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF0E0E14),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: isAnswered ? const Color(0x4D00E676) : const Color(0x1AFFFFFF)),
+                ),
+                child: ListTile(
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
+                  title: Row(
+                    children: [
+                      Text('#${t['id']}', style: const TextStyle(color: Color(0xFF00BCD4), fontWeight: FontWeight.w800, fontSize: 12)),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          t['subject'] ?? t['category'] ?? 'تیکت',
+                          style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 13),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ],
+                  ),
+                  subtitle: Padding(
+                    padding: const EdgeInsets.only(top: 4),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(
+                          t['category'] ?? 'پشتیبانی',
+                          style: const TextStyle(fontSize: 11, color: Color(0xFFA0A0B0)),
+                        ),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: isAnswered ? const Color(0x2600E676) : const Color(0x26FFAB00),
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          child: Text(
+                            isAnswered ? 'پاسخ داده شد' : 'در انتظار بررسی',
+                            style: TextStyle(
+                              fontSize: 10,
+                              fontWeight: FontWeight.w700,
+                              color: isAnswered ? const Color(0xFF00E676) : const Color(0xFFFFAB00),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  trailing: const Icon(Icons.chevron_right, color: Colors.white54, size: 18),
+                  onTap: () => _showTicketChatDialog(t['id'], t['subject'] ?? 'پشتیبانی'),
+                ),
+              );
+            }),
+        ],
+      ),
+    );
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // ⚙️ TAB 4: ACCOUNT & SETTINGS
   // ══════════════════════════════════════════════════════════════════════════
   Widget _buildSettingsTab() {
     if (_userToken == null) {
@@ -1160,9 +1621,15 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
             final code = _userData?['referral_code'] ?? '';
             if (code.isNotEmpty) {
               Clipboard.setData(ClipboardData(text: code));
-              _showToast('کد رفرال کپی شد: $code');
+              _showToast('کد رفرال کپی شد! با دعوت هر کاربر ۴ ساعت اشتراک رایگان دریافت می‌کنید.');
             }
           },
+        ),
+        _buildSettingsItem(
+          icon: Icons.support_agent_outlined,
+          title: 'تیکت‌ها و پشتیبانی',
+          value: 'مشاهده و ارسال',
+          onTap: () => _showTicketsModal(),
         ),
         if (_uiConfig['show_support_in_settings'] == true) ...[
           _buildSettingsItem(
@@ -1414,6 +1881,7 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
         items: const [
           BottomNavigationBarItem(icon: Icon(Icons.bolt), label: 'اتصال'),
           BottomNavigationBarItem(icon: Icon(Icons.shopping_bag_outlined), label: 'پلن‌ها'),
+          BottomNavigationBarItem(icon: Icon(Icons.support_agent_outlined), label: 'پشتیبانی'),
           BottomNavigationBarItem(icon: Icon(Icons.settings_outlined), label: 'تنظیمات'),
         ],
       ),
