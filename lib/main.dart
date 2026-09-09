@@ -33,7 +33,14 @@ class RyzerApp extends StatelessWidget {
         fontFamily: 'Vazirmatn',
         colorScheme: const ColorScheme.dark(
           primary: Color(0xFFFF3B5C),
+          onPrimary: Colors.white,
           surface: Color(0xFF0E0E14),
+        ),
+        elevatedButtonTheme: ElevatedButtonThemeData(
+          style: ElevatedButton.styleFrom(
+            foregroundColor: Colors.white,
+            textStyle: const TextStyle(fontFamily: 'Vazirmatn', fontWeight: FontWeight.w800),
+          ),
         ),
       ),
       home: const MainScreen(),
@@ -1458,27 +1465,24 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
                 const SizedBox(height: 12),
                 SizedBox(
                   height: 44,
-                  child: ElevatedButton.icon(
+                  child: ElevatedButton(
                     onPressed: _isSubmittingTicket ? null : _submitTicket,
-                    icon: _isSubmittingTicket
-                        ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-                        : const Icon(Icons.send_rounded, size: 16, color: Colors.white),
-                    label: Text(
-                      _isSubmittingTicket
-                          ? 'در حال ارسال پیام...'
-                          : _supportCategoryIndex == 0
-                              ? 'ثبت تیکت و دریافت کد پیگیری'
-                              : _supportCategoryIndex == 1
-                                  ? 'ارسال نظر و فیدبک'
-                                  : 'ارسال درخواست دامنه',
-                      style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13, color: Colors.white),
-                    ),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: const Color(0xFFFF3B5C),
                       foregroundColor: Colors.white,
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                       elevation: 0,
                     ),
+                    child: _isSubmittingTicket
+                        ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                        : Text(
+                            _supportCategoryIndex == 0
+                                ? 'ارسال تیکت و دریافت کد پیگیری'
+                                : _supportCategoryIndex == 1
+                                    ? 'ارسال نظر و فیدبک'
+                                    : 'ارسال درخواست دامنه',
+                            style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13, color: Colors.white),
+                          ),
                   ),
                 ),
               ],
