@@ -508,15 +508,15 @@ class ApiService {
     }
   }
 
-  /// Cafe Bazaar Server-side verification
-  static Future<Map<String, dynamic>> verifyBazaarPurchase({
+  /// Myket Server-side verification
+  static Future<Map<String, dynamic>> verifyMyketPurchase({
     required String token,
     required String sku,
     required String purchaseToken,
   }) async {
     try {
       final response = await http.post(
-        Uri.parse('$baseUrl/api/payment/bazaar/verify'),
+        Uri.parse('$baseUrl/api/payment/myket/verify'),
         headers: {
           'Content-Type': 'application/json',
           'User-Agent': userAgent,

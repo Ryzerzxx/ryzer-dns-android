@@ -1035,25 +1035,17 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        const Text('مبلغ پلن', style: TextStyle(fontSize: 12, color: Color(0xFFA0A0B0))),
+                        const Text('مبلغ اشتراک', style: TextStyle(fontSize: 12, color: Color(0xFFA0A0B0))),
                         Text(baseFormatted, style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: Colors.white)),
-                      ],
-                    ),
-                    const SizedBox(height: 10),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        const Text('کارمزد درگاه پرداخت', style: TextStyle(fontSize: 12, color: Color(0xFFA0A0B0))),
-                        Text(feeFormatted, style: const TextStyle(fontSize: 12, color: Color(0xFFA0A0B0))),
                       ],
                     ),
                     const Divider(color: Color(0x33FFFFFF), height: 20),
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        const Text('مبلغ قابل پرداخت', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800, color: Colors.white)),
+                        const Text('مبلغ قابل پرداخت در مایکت', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800, color: Colors.white)),
                         Text(
-                          totalFormatted,
+                          baseFormatted,
                           style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w900, color: Color(0xFF00E676)),
                         ),
                       ],
@@ -1063,7 +1055,7 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
               ),
               const SizedBox(height: 12),
               const Text(
-                'پس از پرداخت در درگاه، اشتراک اکانت شما بلافاصله فعال می‌شود.',
+                'پرداخت امن از طریق درگاه رسمی مایکت انجام می‌شود و اشتراک بلافاصله فعال می‌گردد.',
                 style: TextStyle(fontSize: 11, color: Color(0xFFA0A0B0), height: 1.5),
                 textAlign: TextAlign.center,
               ),
@@ -1077,11 +1069,11 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
             ElevatedButton(
               onPressed: () => Navigator.pop(ctx, true),
               style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFFFF3B5C),
-                foregroundColor: Colors.white,
+                backgroundColor: const Color(0xFF00E676),
+                foregroundColor: Colors.black,
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
               ),
-              child: const Text('انتقال به درگاه پرداخت'),
+              child: const Text('پرداخت درون‌برنامه‌ای مایکت', style: TextStyle(fontWeight: FontWeight.bold)),
             ),
           ],
         ),
@@ -1090,28 +1082,45 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
 
     if (confirm != true) return;
 
-    _showToast('در حال صدور فاکتور و اتصال به درگاه...');
-    final res = await ApiService.requestPayment(
-      token: _userToken!,
-      planTier: tier,
-      durationMonths: months,
-      source: 'app',
-    );
-
-    if (res['success'] == true && res['payment_url'] != null) {
-      final rawUrl = res['payment_url'].toString().trim();
-      final uri = Uri.tryParse(rawUrl);
-      if (uri != null && uri.isScheme('https')) {
-        final host = uri.host.toLowerCase();
-        // Strict whitelist: Only allow trusted payment gateways (ZarinPal, Shaparak, RyzerDNS)
-        if (host.endsWith('zarinpal.com') || host.endsWith('shaparak.ir') || host.endsWith('ryzerdns.ir')) {
-          await launchUrl(uri, mode: LaunchMode.externalApplication);
+    // Myket In-App Billing ONLY (No external browser or Zarinpal)
+    final sku = '${tier.toLowerCase()}_${months}m';
+    try {
+      const myketChannel = MethodChannel('ir.ryzerdns/myket_billing');
+      _showToast('در حال اتصال به مایکت...');
+      final dynamic buyRes = await myketChannel.invokeMethod('purchaseSku', {
+        'sku': sku,
+        'payload': _userToken!,
+      });
+      
+      if (buyRes is Map && buyRes['status'] == 'success') {
+        final purchaseToken = buyRes['purchaseToken']?.toString() ?? '';
+        _showToast('تراکنش با موفقیت انجام شد، در حال ثبت اشتراک...');
+        final valRes = await ApiService.verifyMyketPurchase(
+          token: _userToken!,
+          sku: sku,
+          purchaseToken: purchaseToken,
+        );
+        if (valRes['success'] == true) {
+          _showToast('اشتراک شما با موفقیت فعال شد!');
+          _refreshUserProfile();
+          return;
+        } else {
+          _showToast(valRes['message'] ?? 'خطا در تایید اشتراک مایکت');
           return;
         }
+      } else {
+        _showToast('پرداخت انجام نشد.');
       }
-      _showToast('درگاه پرداخت نامعتبر یا ناامن شناسایی شد.');
-    } else {
-      _showToast(res['message'] ?? 'خطا در ایجاد درگاه پرداخت.');
+    } on PlatformException catch (pe) {
+      if (pe.code == 'USER_CANCELED') {
+        _showToast('پرداخت توسط شما لغو شد.');
+      } else if (pe.code == 'MYKET_NOT_CONNECTED') {
+        _showToast('برنامه مایکت روی دستگاه شما نصب یا در دسترس نیست.');
+      } else {
+        _showToast(pe.message ?? 'خطا در ارتباط با مایکت');
+      }
+    } catch (e) {
+      _showToast('خطا در اجرای فرآیند خرید مایکت.');
     }
   }
 
