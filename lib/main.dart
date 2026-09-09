@@ -1035,25 +1035,17 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        const Text('مبلغ پلن', style: TextStyle(fontSize: 12, color: Color(0xFFA0A0B0))),
+                        const Text('مبلغ اشتراک', style: TextStyle(fontSize: 12, color: Color(0xFFA0A0B0))),
                         Text(baseFormatted, style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: Colors.white)),
-                      ],
-                    ),
-                    const SizedBox(height: 10),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        const Text('کارمزد درگاه پرداخت', style: TextStyle(fontSize: 12, color: Color(0xFFA0A0B0))),
-                        Text(feeFormatted, style: const TextStyle(fontSize: 12, color: Color(0xFFA0A0B0))),
                       ],
                     ),
                     const Divider(color: Color(0x33FFFFFF), height: 20),
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        const Text('مبلغ قابل پرداخت', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800, color: Colors.white)),
+                        const Text('مبلغ قابل پرداخت در بازار', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800, color: Colors.white)),
                         Text(
-                          totalFormatted,
+                          baseFormatted,
                           style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w900, color: Color(0xFF00E676)),
                         ),
                       ],
@@ -1063,7 +1055,7 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
               ),
               const SizedBox(height: 12),
               const Text(
-                'پس از پرداخت در درگاه، اشتراک اکانت شما بلافاصله فعال می‌شود.',
+                'پرداخت امن از طریق درگاه رسمی کافه‌بازار انجام می‌شود و اشتراک بلافاصله فعال می‌گردد.',
                 style: TextStyle(fontSize: 11, color: Color(0xFFA0A0B0), height: 1.5),
                 textAlign: TextAlign.center,
               ),
@@ -1077,11 +1069,11 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
             ElevatedButton(
               onPressed: () => Navigator.pop(ctx, true),
               style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFFFF3B5C),
-                foregroundColor: Colors.white,
+                backgroundColor: const Color(0xFF00E676),
+                foregroundColor: Colors.black,
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
               ),
-              child: const Text('انتقال به درگاه پرداخت'),
+              child: const Text('پرداخت درون‌برنامه‌ای بازار', style: TextStyle(fontWeight: FontWeight.bold)),
             ),
           ],
         ),
@@ -1090,7 +1082,7 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
 
     if (confirm != true) return;
 
-    // Check if client is running as Bazaar variant or fallback
+    // Cafe Bazaar In-App Billing ONLY (No external browser or Zarinpal)
     final sku = '${tier.toLowerCase()}_${months}m';
     try {
       const bazaarChannel = MethodChannel('ir.ryzerdns/bazaar_billing');
@@ -1113,36 +1105,22 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
           _refreshUserProfile();
           return;
         } else {
-          _showToast(valRes['message'] ?? 'خطا در ثبت نهایی اشتراک بازار');
+          _showToast(valRes['message'] ?? 'خطا در تایید اشتراک بازار');
           return;
         }
+      } else {
+        _showToast('پرداخت انجام نشد.');
+      }
+    } on PlatformException catch (pe) {
+      if (pe.code == 'USER_CANCELED') {
+        _showToast('پرداخت توسط شما لغو شد.');
+      } else if (pe.code == 'BAZAAR_NOT_CONNECTED') {
+        _showToast('برنامه کافه‌بازار روی دستگاه شما نصب یا در دسترس نیست.');
+      } else {
+        _showToast(pe.message ?? 'خطا در ارتباط با کافه‌بازار');
       }
     } catch (e) {
-      // If Bazaar is not installed or error, fallback to Direct Web/Zarinpal
-    }
-
-    _showToast('در حال صدور فاکتور و اتصال به درگاه...');
-    final res = await ApiService.requestPayment(
-      token: _userToken!,
-      planTier: tier,
-      durationMonths: months,
-      source: 'app',
-    );
-
-    if (res['success'] == true && res['payment_url'] != null) {
-      final rawUrl = res['payment_url'].toString().trim();
-      final uri = Uri.tryParse(rawUrl);
-      if (uri != null && uri.isScheme('https')) {
-        final host = uri.host.toLowerCase();
-        // Strict whitelist: Only allow trusted payment gateways (ZarinPal, Shaparak, RyzerDNS)
-        if (host.endsWith('zarinpal.com') || host.endsWith('shaparak.ir') || host.endsWith('ryzerdns.ir')) {
-          await launchUrl(uri, mode: LaunchMode.externalApplication);
-          return;
-        }
-      }
-      _showToast('درگاه پرداخت نامعتبر یا ناامن شناسایی شد.');
-    } else {
-      _showToast(res['message'] ?? 'خطا در ایجاد درگاه پرداخت.');
+      _showToast('خطا در اجرای فرآیند خرید کافه‌بازار.');
     }
   }
 
