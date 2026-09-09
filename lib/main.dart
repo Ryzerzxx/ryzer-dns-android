@@ -1463,26 +1463,47 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
                   ),
                 ),
                 const SizedBox(height: 12),
-                SizedBox(
-                  height: 44,
-                  child: ElevatedButton(
-                    onPressed: _isSubmittingTicket ? null : _submitTicket,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFFFF3B5C),
-                      foregroundColor: Colors.white,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                      elevation: 0,
+                Container(
+                  width: double.infinity,
+                  height: 46,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFF3B5C),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Material(
+                    color: Colors.transparent,
+                    child: InkWell(
+                      borderRadius: BorderRadius.circular(10),
+                      onTap: _isSubmittingTicket ? null : _submitTicket,
+                      child: Center(
+                        child: _isSubmittingTicket
+                            ? const SizedBox(
+                                width: 20,
+                                height: 20,
+                                child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
+                              )
+                            : Row(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  const Icon(Icons.send_rounded, size: 16, color: Colors.white),
+                                  const SizedBox(width: 8),
+                                  Text(
+                                    _supportCategoryIndex == 0
+                                        ? 'ثبت تیکت و دریافت کد پیگیری'
+                                        : _supportCategoryIndex == 1
+                                            ? 'ارسال نظر و فیدبک'
+                                            : 'ارسال درخواست دامنه',
+                                    style: const TextStyle(
+                                      fontFamily: 'Vazirmatn',
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w900,
+                                      color: Colors.white,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                      ),
                     ),
-                    child: _isSubmittingTicket
-                        ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-                        : Text(
-                            _supportCategoryIndex == 0
-                                ? 'ارسال تیکت و دریافت کد پیگیری'
-                                : _supportCategoryIndex == 1
-                                    ? 'ارسال نظر و فیدبک'
-                                    : 'ارسال درخواست دامنه',
-                            style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13, color: Colors.white),
-                          ),
                   ),
                 ),
               ],
