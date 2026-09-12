@@ -11,10 +11,10 @@ import android.os.Build
 import android.os.Bundle
 import android.os.IBinder
 import androidx.annotation.NonNull
+import com.android.vending.billing.IInAppBillingService
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
-import ir.mservices.market.InAppBillingService
 import org.json.JSONObject
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
@@ -31,7 +31,7 @@ class MainActivity: FlutterActivity() {
     private var targetSecondaryDns = "46.8.102.223"
 
     @Volatile
-    private var mBillingService: InAppBillingService? = null
+    private var mBillingService: IInAppBillingService? = null
     @Volatile
     private var isBillingBound = false
     private var connectionLatch = CountDownLatch(1)
@@ -39,7 +39,7 @@ class MainActivity: FlutterActivity() {
     private val mServiceConn = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName?, service: IBinder?) {
             try {
-                mBillingService = InAppBillingService.Stub.asInterface(service)
+                mBillingService = IInAppBillingService.Stub.asInterface(service)
                 isBillingBound = true
                 connectionLatch.countDown()
             } catch (e: Exception) {
@@ -113,7 +113,7 @@ class MainActivity: FlutterActivity() {
                     val payload = call.argument<String>("payload") ?: ""
 
                     Thread {
-                        // If not yet bound, bind and wait up to 3 seconds
+                        // If not yet bound, bind and wait up to 3.5 seconds
                         if (mBillingService == null) {
                             bindMyketService()
                             try {
@@ -176,7 +176,6 @@ class MainActivity: FlutterActivity() {
                                 }
                             } else if (responseCode == 7) {
                                 // Item already owned (BILLING_RESPONSE_RESULT_ITEM_ALREADY_OWNED)
-                                // Consume any pending purchase and inform user
                                 try {
                                     val purchases = service.getPurchases(3, packageName, "inapp", null)
                                     val tokens = purchases?.getStringArrayList("INAPP_PURCHASE_TOKEN_LIST")
@@ -187,7 +186,7 @@ class MainActivity: FlutterActivity() {
                                     }
                                 } catch (e: Exception) {}
                                 runOnUiThread {
-                                    result.error("ALREADY_OWNED", "اشتراک قبلی مصرف شد. لطفاً مجدداً دکمه خرید را لمس کنید.", null)
+                                    result.error("ALREADY_OWNED", "اشتراک قبلی فعال‌سازی شد. لطفاً مجدداً دکمه پرداخت را لمس کنید.", null)
                                 }
                             } else {
                                 runOnUiThread {
@@ -215,7 +214,6 @@ class MainActivity: FlutterActivity() {
                 }
                 val bound = bindService(serviceIntent, mServiceConn, Context.BIND_AUTO_CREATE)
                 if (!bound) {
-                    // Fallback to explicit component name if needed
                     serviceIntent.component = ComponentName("ir.mservices.market", "ir.mservices.market.InAppBillingService")
                     bindService(serviceIntent, mServiceConn, Context.BIND_AUTO_CREATE)
                 }
