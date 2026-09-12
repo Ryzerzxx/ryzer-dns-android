@@ -1043,7 +1043,7 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        const Text('مبلغ قابل پرداخت در مایکت', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800, color: Colors.white)),
+                        const Text('مبلغ قابل پرداخت', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800, color: Colors.white)),
                         Text(
                           baseFormatted,
                           style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w900, color: Color(0xFF00E676)),
@@ -1055,7 +1055,7 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
               ),
               const SizedBox(height: 12),
               const Text(
-                'پرداخت امن از طریق درگاه رسمی مایکت انجام می‌شود و اشتراک بلافاصله فعال می‌گردد.',
+                'پرداخت امن از طریق درگاه رسمی انجام می‌شود و اشتراک بلافاصله فعال می‌گردد.',
                 style: TextStyle(fontSize: 11, color: Color(0xFFA0A0B0), height: 1.5),
                 textAlign: TextAlign.center,
               ),
@@ -1073,7 +1073,7 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
                 foregroundColor: Colors.black,
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
               ),
-              child: const Text('پرداخت درون‌برنامه‌ای مایکت', style: TextStyle(fontWeight: FontWeight.bold)),
+              child: const Text('پرداخت', style: TextStyle(fontWeight: FontWeight.bold)),
             ),
           ],
         ),
