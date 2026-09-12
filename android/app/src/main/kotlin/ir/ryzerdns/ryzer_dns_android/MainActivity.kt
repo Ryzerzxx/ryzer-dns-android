@@ -1,10 +1,13 @@
 package ir.ryzerdns.ryzer_dns_android
 
+import android.app.Activity
+import android.app.PendingIntent
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.ServiceConnection
 import android.net.VpnService
+import android.os.Build
 import android.os.Bundle
 import android.os.IBinder
 import androidx.annotation.NonNull
@@ -13,35 +16,48 @@ import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 import ir.mservices.market.InAppBillingService
 import org.json.JSONObject
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 
 class MainActivity: FlutterActivity() {
     private val CHANNEL = "ir.ryzerdns/vpn"
     private val MYKET_CHANNEL = "ir.ryzerdns/myket_billing"
     private val VPN_REQUEST_CODE = 2026
+    private val MYKET_PURCHASE_REQUEST_CODE = 2027
+
     private var pendingResult: MethodChannel.Result? = null
+    private var pendingMyketResult: MethodChannel.Result? = null
     private var targetPrimaryDns = "87.248.145.40"
     private var targetSecondaryDns = "46.8.102.223"
 
-    private val MYKET_RSA_KEY = "MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQCSFZFMD07zzp9eOG95m3Swifaa9unu21AJqjNVKKc/EuGHa7OWlCymw4ngTIQI4gYN3Je7UNavxl7bM+yUJrQpELAQvvUdEoLjR6Prja3Lk9BMvibgbYEGRHiM9avLSt3kRSIruJntUh3/CeNL9DhL/pZzwxeOURv92zmqenoQMwIDAQAB"
-
+    @Volatile
     private var mBillingService: InAppBillingService? = null
+    @Volatile
     private var isBillingBound = false
+    private var connectionLatch = CountDownLatch(1)
 
     private val mServiceConn = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName?, service: IBinder?) {
-            mBillingService = InAppBillingService.Stub.asInterface(service)
-            isBillingBound = true
+            try {
+                mBillingService = InAppBillingService.Stub.asInterface(service)
+                isBillingBound = true
+                connectionLatch.countDown()
+            } catch (e: Exception) {
+                // Ignore
+            }
         }
 
         override fun onServiceDisconnected(name: ComponentName?) {
             mBillingService = null
             isBillingBound = false
+            connectionLatch = CountDownLatch(1)
         }
     }
 
     override fun configureFlutterEngine(@NonNull flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
 
+        // Proactively bind Myket Billing Service on app startup
         bindMyketService()
 
         // 1. VPN Channel
@@ -95,47 +111,116 @@ class MainActivity: FlutterActivity() {
                 "purchaseSku" -> {
                     val sku = call.argument<String>("sku") ?: ""
                     val payload = call.argument<String>("payload") ?: ""
-                    
-                    if (mBillingService == null) {
-                        bindMyketService()
-                        result.error("MYKET_NOT_CONNECTED", "سرویس پرداخت مایکت در حال اتصال است، مجدداً تلاش کنید.", null)
-                        return@setMethodCallHandler
-                    }
 
-                    try {
-                        val buyIntentBundle = mBillingService?.getBuyIntent(3, packageName, sku, "inapp", payload)
-                        val responseCode = buyIntentBundle?.getInt("RESPONSE_CODE") ?: -1
-                        if (responseCode == 0) {
-                            val pendingIntent = buyIntentBundle?.getParcelable<android.app.PendingIntent>("BUY_INTENT")
-                            if (pendingIntent != null) {
-                                pendingMyketResult = result
-                                startIntentSenderForResult(pendingIntent.intentSender, 2027, Intent(), 0, 0, 0)
-                            } else {
-                                result.error("FLOW_FAILED", "خطا در دریافت درگاه مایکت", null)
+                    Thread {
+                        // If not yet bound, bind and wait up to 3 seconds
+                        if (mBillingService == null) {
+                            bindMyketService()
+                            try {
+                                connectionLatch.await(3500, TimeUnit.MILLISECONDS)
+                            } catch (e: Exception) {
+                                // proceed
                             }
-                        } else {
-                            result.error("FLOW_FAILED", "خطای ارتباط با مایکت: کد $responseCode", null)
                         }
-                    } catch (e: Exception) {
-                        result.error("FLOW_FAILED", e.message ?: "خطا در فرآیند خرید مایکت", null)
-                    }
+
+                        val service = mBillingService
+                        if (service == null) {
+                            runOnUiThread {
+                                result.error("MYKET_NOT_CONNECTED", "سرویس پرداخت مایکت در دسترس نیست. لطفاً از نصب و به‌روز بودن برنامه مایکت اطمینان حاصل فرمایید.", null)
+                            }
+                            return@Thread
+                        }
+
+                        try {
+                            // Check if billing is supported
+                            val supported = service.isBillingSupported(3, packageName, "inapp")
+                            if (supported != 0) {
+                                runOnUiThread {
+                                    result.error("NOT_SUPPORTED", "پرداخت درون‌برنامه‌ای در این نسخه از مایکت پشتیبانی نمی‌شود.", null)
+                                }
+                                return@Thread
+                            }
+
+                            val buyIntentBundle = service.getBuyIntent(3, packageName, sku, "inapp", payload)
+                            val responseCode = buyIntentBundle?.getInt("RESPONSE_CODE") ?: -1
+
+                            if (responseCode == 0) {
+                                val pendingIntent: PendingIntent? = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                                    buyIntentBundle?.getParcelable("BUY_INTENT", PendingIntent::class.java)
+                                } else {
+                                    @Suppress("DEPRECATION")
+                                    buyIntentBundle?.getParcelable("BUY_INTENT")
+                                }
+
+                                if (pendingIntent != null) {
+                                    runOnUiThread {
+                                        pendingMyketResult = result
+                                        try {
+                                            startIntentSenderForResult(
+                                                pendingIntent.intentSender,
+                                                MYKET_PURCHASE_REQUEST_CODE,
+                                                Intent(),
+                                                0,
+                                                0,
+                                                0
+                                            )
+                                        } catch (e: Exception) {
+                                            pendingMyketResult = null
+                                            result.error("FLOW_FAILED", "خطا در باز کردن درگاه پرداخت مایکت: ${e.message}", null)
+                                        }
+                                    }
+                                } else {
+                                    runOnUiThread {
+                                        result.error("FLOW_FAILED", "درگاه پرداخت از سوی مایکت دریافت نشد.", null)
+                                    }
+                                }
+                            } else if (responseCode == 7) {
+                                // Item already owned (BILLING_RESPONSE_RESULT_ITEM_ALREADY_OWNED)
+                                // Consume any pending purchase and inform user
+                                try {
+                                    val purchases = service.getPurchases(3, packageName, "inapp", null)
+                                    val tokens = purchases?.getStringArrayList("INAPP_PURCHASE_TOKEN_LIST")
+                                    if (tokens != null) {
+                                        for (tok in tokens) {
+                                            service.consumePurchase(3, packageName, tok)
+                                        }
+                                    }
+                                } catch (e: Exception) {}
+                                runOnUiThread {
+                                    result.error("ALREADY_OWNED", "اشتراک قبلی مصرف شد. لطفاً مجدداً دکمه خرید را لمس کنید.", null)
+                                }
+                            } else {
+                                runOnUiThread {
+                                    result.error("FLOW_FAILED", "خطای مایکت (کد $responseCode)", null)
+                                }
+                            }
+                        } catch (e: Exception) {
+                            runOnUiThread {
+                                result.error("FLOW_FAILED", e.message ?: "خطا در ارتباط با مایکت", null)
+                            }
+                        }
+                    }.start()
                 }
                 else -> result.notImplemented()
             }
         }
     }
 
-    private var pendingMyketResult: MethodChannel.Result? = null
-
     private fun bindMyketService() {
         if (!isBillingBound) {
-            val serviceIntent = Intent("ir.mservices.market.InAppBillingService.BIND").apply {
-                `package` = "ir.mservices.market"
-            }
             try {
-                bindService(serviceIntent, mServiceConn, Context.BIND_AUTO_CREATE)
+                connectionLatch = CountDownLatch(1)
+                val serviceIntent = Intent("ir.mservices.market.InAppBillingService.BIND").apply {
+                    setPackage("ir.mservices.market")
+                }
+                val bound = bindService(serviceIntent, mServiceConn, Context.BIND_AUTO_CREATE)
+                if (!bound) {
+                    // Fallback to explicit component name if needed
+                    serviceIntent.component = ComponentName("ir.mservices.market", "ir.mservices.market.InAppBillingService")
+                    bindService(serviceIntent, mServiceConn, Context.BIND_AUTO_CREATE)
+                }
             } catch (e: Exception) {
-                // ignore
+                // Ignore
             }
         }
     }
@@ -146,7 +231,7 @@ class MainActivity: FlutterActivity() {
             putExtra("primary_dns", targetPrimaryDns)
             putExtra("secondary_dns", targetSecondaryDns)
         }
-        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             startForegroundService(startIntent)
         } else {
             startService(startIntent)
@@ -155,7 +240,9 @@ class MainActivity: FlutterActivity() {
 
     override fun onDestroy() {
         if (isBillingBound) {
-            unbindService(mServiceConn)
+            try {
+                unbindService(mServiceConn)
+            } catch (e: Exception) {}
             isBillingBound = false
         }
         super.onDestroy()
@@ -164,15 +251,18 @@ class MainActivity: FlutterActivity() {
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
         if (requestCode == VPN_REQUEST_CODE) {
-            if (resultCode == RESULT_OK) {
+            if (resultCode == Activity.RESULT_OK) {
                 startVpnServiceInternal()
                 pendingResult?.success(true)
             } else {
                 pendingResult?.success(false)
             }
             pendingResult = null
-        } else if (requestCode == 2027) {
-            if (resultCode == RESULT_OK && data != null) {
+        } else if (requestCode == MYKET_PURCHASE_REQUEST_CODE) {
+            val resCallback = pendingMyketResult
+            pendingMyketResult = null
+
+            if (resultCode == Activity.RESULT_OK && data != null) {
                 val purchaseData = data.getStringExtra("INAPP_PURCHASE_DATA")
                 val dataSignature = data.getStringExtra("INAPP_DATA_SIGNATURE")
                 if (purchaseData != null) {
@@ -181,8 +271,8 @@ class MainActivity: FlutterActivity() {
                         val purchaseToken = jsonObj.optString("purchaseToken", "")
                         val orderId = jsonObj.optString("orderId", "")
                         val productId = jsonObj.optString("productId", "")
-                        
-                        // Consume purchase in background thread so it can be bought again
+
+                        // Consume purchase in background thread so it can be re-purchased in future
                         Thread {
                             try {
                                 mBillingService?.consumePurchase(3, packageName, purchaseToken)
@@ -196,17 +286,16 @@ class MainActivity: FlutterActivity() {
                             "productId" to productId,
                             "signature" to (dataSignature ?: "")
                         )
-                        pendingMyketResult?.success(resultMap)
+                        resCallback?.success(resultMap)
                     } catch (e: Exception) {
-                        pendingMyketResult?.error("PARSING_ERROR", "خطا در خواندن نتیجه خرید", null)
+                        resCallback?.error("PARSING_ERROR", "خطا در پردازش اطلاعات پرداخت مایکت", null)
                     }
                 } else {
-                    pendingMyketResult?.error("EMPTY_DATA", "داده‌های خرید دریافت نشد.", null)
+                    resCallback?.error("EMPTY_DATA", "اطلاعات خرید دریافت نشد.", null)
                 }
             } else {
-                pendingMyketResult?.error("USER_CANCELED", "پرداخت توسط کاربر لغو شد.", null)
+                resCallback?.error("USER_CANCELED", "پرداخت توسط کاربر لغو شد.", null)
             }
-            pendingMyketResult = null
         }
     }
 }
