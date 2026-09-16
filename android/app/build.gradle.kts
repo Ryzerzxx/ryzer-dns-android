@@ -30,7 +30,7 @@ android {
     }
 
     buildFeatures {
-        aidl = true
+        aidl = false
     }
 
     defaultConfig {
