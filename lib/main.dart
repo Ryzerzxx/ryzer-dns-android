@@ -4,6 +4,9 @@ import 'package:flutter/services.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:myket_iap/myket_iap.dart';
+import 'package:myket_iap/util/iab_result.dart';
+import 'package:myket_iap/util/purchase.dart';
 import 'api_service.dart';
 import 'vpn_manager.dart';
 
@@ -82,6 +85,13 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
     _loadStoredSession();
     _fetchRemoteConfig();
     _loadTickets();
+    _initMyketBilling();
+  }
+
+  void _initMyketBilling() async {
+    try {
+      await MyketIAP.init(rsaKey: "", enableDebugLogging: false);
+    } catch (_) {}
   }
 
   Future<void> _fetchRemoteConfig() async {
@@ -1100,19 +1110,33 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
 
     if (confirm != true) return;
 
-    // Myket In-App Billing ONLY (No external browser or Zarinpal)
+    // Myket In-App Billing ONLY (Official SDK with Full Android 12-16 Compatibility)
     final sku = '${tier.toLowerCase()}_${months}m';
     try {
-      const myketChannel = MethodChannel('ir.ryzerdns/myket_billing');
       _showToast('در حال اتصال به مایکت...');
-      final dynamic buyRes = await myketChannel.invokeMethod('purchaseSku', {
-        'sku': sku,
-        'payload': _userToken!,
-      });
       
-      if (buyRes is Map && buyRes['status'] == 'success') {
-        final purchaseToken = buyRes['purchaseToken']?.toString() ?? '';
+      // Ensure billing client is initialized
+      try {
+        await MyketIAP.init(rsaKey: "", enableDebugLogging: false);
+      } catch (_) {}
+
+      final dynamic buyRes = await MyketIAP.launchPurchaseFlow(
+        sku: sku,
+        payload: _userToken,
+      );
+
+      final IabResult? iabResult = buyRes[MyketIAP.RESULT];
+      final Purchase? purchase = buyRes[MyketIAP.PURCHASE];
+
+      if (iabResult != null && iabResult.isSuccess() && purchase != null) {
+        final purchaseToken = purchase.mToken;
         _showToast('تراکنش با موفقیت انجام شد، در حال ثبت اشتراک...');
+        
+        // Auto-consume consumable purchase so it can be renewed/repurchased
+        try {
+          await MyketIAP.consume(purchase: purchase);
+        } catch (_) {}
+
         final valRes = await ApiService.verifyMyketPurchase(
           token: _userToken!,
           sku: sku,
@@ -1127,15 +1151,22 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
           return;
         }
       } else {
-        _showToast('پرداخت انجام نشد.');
-      }
-    } on PlatformException catch (pe) {
-      if (pe.code == 'USER_CANCELED') {
-        _showToast('پرداخت توسط شما لغو شد.');
-      } else if (pe.code == 'MYKET_NOT_CONNECTED') {
-        _showToast('برنامه مایکت روی دستگاه شما نصب یا در دسترس نیست.');
-      } else {
-        _showToast(pe.message ?? 'خطا در ارتباط با مایکت');
+        if (iabResult != null && iabResult.mResponse == 1) { // USER_CANCELED
+          _showToast('پرداخت توسط شما لغو شد.');
+        } else if (iabResult != null && iabResult.mResponse == 7) { // ITEM_ALREADY_OWNED
+          _showToast('اشتراک قبلی شناسایی شد. در حال بازیابی...');
+          try {
+            final invMap = await MyketIAP.queryInventory(querySkuDetails: false);
+            final Inventory? inv = invMap[MyketIAP.INVENTORY];
+            final owned = inv?.mPurchaseMap[sku];
+            if (owned != null) {
+              await MyketIAP.consume(purchase: owned);
+              _showToast('لطفاً مجدداً دکمه پرداخت را لمس فرمایید.');
+            }
+          } catch (_) {}
+        } else {
+          _showToast(iabResult?.mMessage ?? 'پرداخت انجام نشد.');
+        }
       }
     } catch (e) {
       _showToast('خطا در اجرای فرآیند خرید مایکت.');
