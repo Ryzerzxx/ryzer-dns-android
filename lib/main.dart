@@ -69,7 +69,7 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
   Timer? _statusTimer;
   Timer? _pingTimer;
   late AnimationController _pulseController;
-  int _currentNavIndex = 0; // 0: Home, 1: Plans, 2: Settings
+  int _currentNavIndex = 0; // 0: Home, 1: Plans, 2: Support, 3: Settings
 
   // 🌐 Server-Driven UI & Remote Config State
   Map<String, dynamic> _remoteConfig = {};
@@ -381,6 +381,7 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
                   children: [
                     _buildHomeTab(),
                     _buildPlansTab(),
+                    _buildSupportTab(),
                     _buildSettingsTab(),
                   ],
                 ),
@@ -460,7 +461,7 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
           ),
           if (_userToken != null && _userData != null)
             InkWell(
-              onTap: () => setState(() => _currentNavIndex = 2),
+              onTap: () => setState(() => _currentNavIndex = 3), // Switch directly to Settings Tab
               borderRadius: BorderRadius.circular(20),
               child: Container(
                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
@@ -773,7 +774,7 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
             icon: Icons.tune,
             title: _uiConfig['action_btn2_title'] ?? 'تنظیمات حساب',
             subtitle: _uiConfig['action_btn2_subtitle'] ?? 'تغییر رمز و مشخصات',
-            onTap: () => setState(() => _currentNavIndex = 2),
+            onTap: () => setState(() => _currentNavIndex = 3), // Switch directly to Settings Tab
           ),
         ),
       ],
@@ -1741,7 +1742,7 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
           icon: Icons.support_agent_outlined,
           title: 'تیکت‌ها و پشتیبانی',
           value: 'مشاهده و ارسال',
-          onTap: () => _showTicketsModal(),
+          onTap: () => setState(() => _currentNavIndex = 2), // Switch directly to Support Tab
         ),
         if (_uiConfig['show_support_in_settings'] == true) ...[
           _buildSettingsItem(
@@ -1993,6 +1994,7 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
         items: const [
           BottomNavigationBarItem(icon: Icon(Icons.bolt), label: 'اتصال'),
           BottomNavigationBarItem(icon: Icon(Icons.shopping_bag_outlined), label: 'پلن‌ها'),
+          BottomNavigationBarItem(icon: Icon(Icons.support_agent_outlined), label: 'پشتیبانی'),
           BottomNavigationBarItem(icon: Icon(Icons.settings_outlined), label: 'تنظیمات'),
         ],
       ),
