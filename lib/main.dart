@@ -978,6 +978,26 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
       return;
     }
 
+    // Enforce Subscription Business Logic:
+    if (_userData != null) {
+      final userTier = (_userData!['plan_tier'] ?? '').toString().toLowerCase();
+      final isExpired = _userData!['is_expired'] == true;
+      final isTrial = _userData!['is_trial'] == true;
+      final hasPaid = _userData!['has_paid'] == true;
+
+      if (!isExpired && hasPaid && !isTrial) {
+        // User has an active paid subscription:
+        if (userTier == 'pro' && tier.toLowerCase() == 'plus') {
+          _showToast('اشتراک فعال شما PRO است و امکان تمدید یا تغییر به پلن پایین‌تر (Plus) وجود ندارد.');
+          return;
+        }
+        if (userTier == 'plus' && tier.toLowerCase() == 'pro') {
+          _showToast('اشتراک فعال شما PLUS است. جهت ارتقا به پلن پرو، لطفاً از پنل کاربری سایت گزینه ارتقا به PRO را انتخاب فرمایید.');
+          return;
+        }
+      }
+    }
+
     // Exact official pricing and ZarinPal fees identical to website
     final Map<String, Map<String, dynamic>> planDetails = {
       'plus_1': {'base': 89000, 'fee': 945, 'total': 89945, 'dur': '۱ ماهه', 'title': 'Ryzer Plus'},

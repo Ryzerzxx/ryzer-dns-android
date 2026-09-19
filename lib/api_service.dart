@@ -166,6 +166,8 @@ class ApiService {
             'plan_tier': data['plan_tier'] ?? 'pro',
             'days_left': daysLeft,
             'is_expired': isExpired,
+            'is_trial': data['is_trial'] == true,
+            'has_paid': data['has_paid'] == true,
             'remaining_text': remainingText,
             'registered_ip': data['registered_ip'] ?? '',
             'referral_code': data['referral_code'] ?? '',
