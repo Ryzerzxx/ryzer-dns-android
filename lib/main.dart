@@ -89,9 +89,12 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
     _initMyketBilling();
   }
 
+  static const String _myketRsaKey =
+      "MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQCSFZFMD07zzp9eOG95m3Swifaa9unu21AJqjNVKKc/EuGHa7OWlCymw4ngTIQI4gYN3Je7UNavxl7bM+yUJrQpELAQvvUdEoLjR6Prja3Lk9BMvibgbYEGRHiM9avLSt3kRSIruJntUh3/CeNL9DhL/pZzwxeOURv92zmqenoQMwIDAQAB";
+
   void _initMyketBilling() async {
     try {
-      await MyketIAP.init(rsaKey: "", enableDebugLogging: false);
+      await MyketIAP.init(rsaKey: _myketRsaKey, enableDebugLogging: false);
     } catch (_) {}
   }
 
@@ -1118,7 +1121,7 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
       
       // Ensure billing client is initialized
       try {
-        await MyketIAP.init(rsaKey: "", enableDebugLogging: false);
+        await MyketIAP.init(rsaKey: _myketRsaKey, enableDebugLogging: false);
       } catch (_) {}
 
       final dynamic buyRes = await MyketIAP.launchPurchaseFlow(
