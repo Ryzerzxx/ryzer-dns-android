@@ -381,7 +381,6 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
                   children: [
                     _buildHomeTab(),
                     _buildPlansTab(),
-                    _buildSupportTab(),
                     _buildSettingsTab(),
                   ],
                 ),
@@ -1405,7 +1404,21 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
   }
 
   void _showTicketsModal() {
-    setState(() => _currentNavIndex = 2); // Switch to support tab
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: const Color(0xFF0C0C12),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => DraggableScrollableSheet(
+        initialChildSize: 0.85,
+        minChildSize: 0.5,
+        maxChildSize: 0.95,
+        expand: false,
+        builder: (ctx, scrollController) => _buildSupportTab(),
+      ),
+    );
   }
 
   Widget _buildSupportTab() {
@@ -1980,7 +1993,6 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
         items: const [
           BottomNavigationBarItem(icon: Icon(Icons.bolt), label: 'اتصال'),
           BottomNavigationBarItem(icon: Icon(Icons.shopping_bag_outlined), label: 'پلن‌ها'),
-          BottomNavigationBarItem(icon: Icon(Icons.support_agent_outlined), label: 'پشتیبانی'),
           BottomNavigationBarItem(icon: Icon(Icons.settings_outlined), label: 'تنظیمات'),
         ],
       ),
