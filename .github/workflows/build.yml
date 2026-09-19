@@ -28,10 +28,13 @@ jobs:
         run: flutter pub get
 
       - name: Build APK Release
-        run: flutter build apk --release
+        run: |
+          flutter build apk --release
+          find build -name "*.apk" -ls
 
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
           name: RyzerDNS-Release-APK
-          path: build/app/outputs/**/*.apk
+          path: build/app/outputs/flutter-apk/app-release.apk
+          if-no-files-found: error
