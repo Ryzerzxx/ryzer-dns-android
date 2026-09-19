@@ -38,8 +38,8 @@ jobs:
         uses: softprops/action-gh-release@v2
         if: startsWith(github.ref, 'refs/tags/') || github.ref == 'refs/heads/main'
         with:
-          tag_name: v2.0.5-myket
-          name: RyzerDNS Android v2.0.5 (Strict Tier Lock for All Active Accounts)
+          tag_name: v1.0.4-myket
+          name: RyzerDNS Android v1.0.4 (Build 5 for Myket Review)
           files: build/app/outputs/flutter-apk/app-release.apk
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
