@@ -985,8 +985,8 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
       final isTrial = _userData!['is_trial'] == true;
       final hasPaid = _userData!['has_paid'] == true;
 
-      if (!isExpired && hasPaid && !isTrial) {
-        // User has an active paid subscription:
+      // If user has active PRO and is NOT in a 6-hour trial, block buying Plus
+      if (!isExpired && !isTrial) {
         if (userTier == 'pro' && tier.toLowerCase() == 'plus') {
           _showToast('اشتراک فعال شما PRO است و امکان تمدید یا تغییر به پلن پایین‌تر (Plus) وجود ندارد.');
           return;
