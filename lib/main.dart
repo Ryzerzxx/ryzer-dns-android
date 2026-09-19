@@ -1746,8 +1746,8 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
         ),
         if (_uiConfig['show_support_in_settings'] == true) ...[
           _buildSettingsItem(
-            icon: Icons.headset_mic_outlined,
-            title: 'پشتیبانی آنلاین',
+            icon: Icons.email_outlined,
+            title: 'پشتیبانی ایمیل',
             value: _uiConfig['support_label'] ?? 'ارتباط با ما',
             onTap: () {
               final email = _uiConfig['support_email'] ?? 'info@ryzerdns.ir';
@@ -1814,6 +1814,8 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
     String? challengeId;
     bool otpSent = false;
     String? dialogError;
+    String? dialogSuccess;
+    bool obscureText = target == 'password';
 
     showDialog(
       context: context,
@@ -1852,10 +1854,34 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
                       ),
                     ),
                   ],
+                  if (dialogSuccess != null) ...[
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(10),
+                      margin: const EdgeInsets.only(bottom: 12),
+                      decoration: BoxDecoration(
+                        color: const Color(0x1A00E676),
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: const Color(0xFF00E676)),
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.check_circle_outline, color: Color(0xFF00E676), size: 16),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              dialogSuccess!,
+                              style: const TextStyle(color: Color(0xFF00E676), fontSize: 12, fontWeight: FontWeight.w700),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
                   if (!otpSent) ...[
                     TextField(
                       controller: textController,
-                      obscureText: target == 'password',
+                      obscureText: obscureText,
                       style: const TextStyle(color: Colors.white, fontSize: 13),
                       decoration: InputDecoration(
                         hintText: target == 'username' ? 'نام کاربری جدید' : (target == 'email' ? 'ایمیل جدید' : 'رمز عبور حداقل ۸ کاراکتر'),
@@ -1863,6 +1889,16 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
                         filled: true,
                         fillColor: const Color(0xFF14141E),
                         border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none),
+                        suffixIcon: target == 'password'
+                            ? IconButton(
+                                icon: Icon(
+                                  obscureText ? Icons.visibility_off_outlined : Icons.visibility_outlined,
+                                  color: const Color(0xFFA0A0B0),
+                                  size: 20,
+                                ),
+                                onPressed: () => setDialogState(() => obscureText = !obscureText),
+                              )
+                            : null,
                       ),
                     ),
                   ] else ...[
@@ -1917,8 +1953,8 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
                             otpSent = true;
                             challengeId = res['challenge_id'];
                             dialogError = null;
+                            dialogSuccess = 'کد تایید ۶ رقمی به ایمیل شما ارسال شد.';
                           });
-                          _showToast('کد تایید به ایمیل شما ارسال شد.');
                         }
                       } else {
                         setDialogState(() {
@@ -2014,6 +2050,8 @@ class AuthModalSheet extends StatefulWidget {
 
 class _AuthModalSheetState extends State<AuthModalSheet> {
   bool _isLoginTab = true;
+  bool _obscureLoginPass = true;
+  bool _obscureRegPass = true;
 
   // Login Controllers
   final _loginUserCtrl = TextEditingController();
@@ -2130,7 +2168,14 @@ class _AuthModalSheetState extends State<AuthModalSheet> {
       children: [
         _buildTextField(_loginUserCtrl, 'نام کاربری یا ایمیل', Icons.person_outline),
         const SizedBox(height: 12),
-        _buildTextField(_loginPassCtrl, 'رمز عبور', Icons.lock_outline, isPassword: true),
+        _buildTextField(
+          _loginPassCtrl,
+          'رمز عبور',
+          Icons.lock_outline,
+          isPassword: true,
+          obscureText: _obscureLoginPass,
+          onToggleVisibility: () => setState(() => _obscureLoginPass = !_obscureLoginPass),
+        ),
         const SizedBox(height: 18),
         _buildSubmitButton('ورود به حساب کاربری', _handleLogin),
       ],
@@ -2145,7 +2190,14 @@ class _AuthModalSheetState extends State<AuthModalSheet> {
           const SizedBox(height: 10),
           _buildTextField(_regEmailCtrl, 'آدرس ایمیل معتبر', Icons.email_outlined, keyboardType: TextInputType.emailAddress),
           const SizedBox(height: 10),
-          _buildTextField(_regPassCtrl, 'رمز عبور (حداقل ۸ کاراکتر)', Icons.lock_outline, isPassword: true),
+          _buildTextField(
+          _regPassCtrl,
+          'رمز عبور (حداقل ۸ کاراکتر)',
+          Icons.lock_outline,
+          isPassword: true,
+          obscureText: _obscureRegPass,
+          onToggleVisibility: () => setState(() => _obscureRegPass = !_obscureRegPass),
+        ),
           const SizedBox(height: 10),
           _buildTextField(_regRefCtrl, 'کد رفرال معرف (اختیاری)', Icons.card_giftcard),
           const SizedBox(height: 18),
@@ -2170,17 +2222,29 @@ class _AuthModalSheetState extends State<AuthModalSheet> {
     String hint,
     IconData icon, {
     bool isPassword = false,
+    bool obscureText = false,
+    VoidCallback? onToggleVisibility,
     TextInputType keyboardType = TextInputType.text,
     bool isCenter = false,
   }) {
     return TextField(
       controller: ctrl,
-      obscureText: isPassword,
+      obscureText: isPassword ? obscureText : false,
       keyboardType: keyboardType,
       textAlign: isCenter ? TextAlign.center : TextAlign.start,
       style: const TextStyle(color: Colors.white, fontSize: 13),
       decoration: InputDecoration(
         prefixIcon: isCenter ? null : Icon(icon, size: 18, color: const Color(0x80FFFFFF)),
+        suffixIcon: isPassword
+            ? IconButton(
+                icon: Icon(
+                  obscureText ? Icons.visibility_off_outlined : Icons.visibility_outlined,
+                  color: const Color(0xFFA0A0B0),
+                  size: 20,
+                ),
+                onPressed: onToggleVisibility,
+              )
+            : null,
         hintText: hint,
         hintStyle: const TextStyle(color: Color(0x4DFFFFFF), fontSize: 12),
         filled: true,
