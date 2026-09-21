@@ -1199,6 +1199,35 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
     }
   }
 
+  Widget _buildFormattedChatMessage(String text) {
+    if (!text.contains('**')) {
+      return Text(
+        text,
+        style: const TextStyle(fontSize: 12.5, color: Colors.white, height: 1.5),
+      );
+    }
+    final spans = <TextSpan>[];
+    final parts = text.split('**');
+    for (int i = 0; i < parts.length; i++) {
+      if (parts[i].isEmpty) continue;
+      final isBold = i % 2 == 1;
+      spans.add(
+        TextSpan(
+          text: parts[i],
+          style: TextStyle(
+            fontSize: 12.5,
+            color: Colors.white,
+            fontWeight: isBold ? FontWeight.w900 : FontWeight.w400,
+            height: 1.5,
+          ),
+        ),
+      );
+    }
+    return RichText(
+      text: TextSpan(children: spans),
+    );
+  }
+
   void _showTicketChatDialog(int ticketId, String subject) async {
     if (_userToken == null) return;
     final replyCtrl = TextEditingController();
@@ -1305,10 +1334,7 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
                                                 ),
                                               ),
                                               const SizedBox(height: 4),
-                                              Text(
-                                                m['message'] ?? '',
-                                                style: const TextStyle(fontSize: 12.5, color: Colors.white, height: 1.5),
-                                              ),
+                                              _buildFormattedChatMessage(m['message'] ?? ''),
                                               const SizedBox(height: 4),
                                               Text(
                                                 (m['created_at'] ?? '').toString().replaceFirst('T', ' ').split('.')[0],

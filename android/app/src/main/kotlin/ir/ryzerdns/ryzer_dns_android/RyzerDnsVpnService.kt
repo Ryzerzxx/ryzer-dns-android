@@ -6,6 +6,7 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ServiceInfo
 import android.net.VpnService
 import android.os.Build
 import android.os.ParcelFileDescriptor
@@ -76,7 +77,20 @@ class RyzerDnsVpnService : VpnService() {
                 .build()
         }
 
-        startForeground(1001, notification)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            try {
+                if (Build.VERSION.SDK_INT >= 34) { // Android 14+
+                    startForeground(1001, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_SYSTEM_EXEMPTED)
+                } else {
+                    startForeground(1001, notification)
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Fallback startForeground: ${e.message}")
+                startForeground(1001, notification)
+            }
+        } else {
+            startForeground(1001, notification)
+        }
 
         try {
             val builder = Builder()
