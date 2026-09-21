@@ -33,12 +33,6 @@ android {
         aidl = false
     }
 
-    defaultConfig {
-        manifestPlaceholders["marketApplicationId"] = "ir.mservices.market"
-        manifestPlaceholders["marketBindAddress"] = "ir.mservices.market.InAppBillingService.BIND"
-        manifestPlaceholders["marketPermission"] = "ir.mservices.market.BILLING"
-    }
-
     signingConfigs {
         create("release") {
             val ksPath = System.getenv("KEYSTORE_PATH") ?: "../keystores/release.jks"
