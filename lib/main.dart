@@ -93,7 +93,7 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
   }
 
   void _checkAndPromptUpdate(Map<String, dynamic> cfg) {
-    const currentAppVersion = "2.0.0";
+    const currentAppVersion = "1.0.1";
     final latestVersion = cfg['latest_version'] ?? currentAppVersion;
     final updateAvailable = cfg['update_available'] == true || latestVersion != currentAppVersion;
     final minRequired = cfg['min_required_version'] ?? currentAppVersion;
