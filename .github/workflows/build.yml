@@ -38,8 +38,8 @@ jobs:
         uses: softprops/action-gh-release@v2
         if: startsWith(github.ref, 'refs/tags/') || github.ref == 'refs/heads/main'
         with:
-          tag_name: v2.1.0-direct
-          name: RyzerDNS Android v2.1.0 (Direct Zarinpal Gateway Release)
+          tag_name: v1.0.1-myket
+          name: RyzerDNS Android v1.0.1 (Myket Release)
           files: build/app/outputs/flutter-apk/app-release.apk
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
