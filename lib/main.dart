@@ -4,6 +4,10 @@ import 'package:flutter/services.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:myket_iap/myket_iap.dart';
+import 'package:myket_iap/util/iab_result.dart';
+import 'package:myket_iap/util/inventory.dart';
+import 'package:myket_iap/util/purchase.dart';
 import 'api_service.dart';
 import 'vpn_manager.dart';
 
@@ -82,6 +86,15 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
     _loadStoredSession();
     _fetchRemoteConfig();
     _loadTickets();
+    _initMyketBilling();
+  }
+
+  static const String _myketRsaKey = "MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQCSFZFMD07zzp9eOG95m3Swifaa9unu21AJqjNVKKc/EuGHa7OWlCymw4ngTIQI4gYN3Je7UNavxl7bM+yUJrQpELAQvvUdEoLjR6Prja3Lk9BMvibgbYEGRHiM9avLSt3kRSIruJntUh3/CeNL9DhL/pZzwxeOURv92zmqenoQMwIDAQAB";
+
+  void _initMyketBilling() async {
+    try {
+      await MyketIAP.init(rsaKey: _myketRsaKey, enableDebugLogging: false);
+    } catch (_) {}
   }
 
   Future<void> _fetchRemoteConfig() async {
@@ -1122,27 +1135,68 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
 
     if (confirm != true) return;
 
-    _showToast('در حال صدور فاکتور و اتصال به درگاه...');
-    final res = await ApiService.requestPayment(
-      token: _userToken!,
-      planTier: tier,
-      durationMonths: months,
-      source: 'app',
-    );
+    // Myket In-App Billing ONLY (Official Myket IAB SDK)
+    final sku = '${tier.toLowerCase()}_${months}m';
+    try {
+      _showToast('در حال اتصال به مایکت...');
 
-    if (res['success'] == true && res['payment_url'] != null) {
-      final rawUrl = res['payment_url'].toString().trim();
-      final uri = Uri.tryParse(rawUrl);
-      if (uri != null && uri.isScheme('https')) {
-        final host = uri.host.toLowerCase();
-        if (host.endsWith('zarinpal.com') || host.endsWith('shaparak.ir') || host.endsWith('ryzerdns.ir')) {
-          await launchUrl(uri, mode: LaunchMode.externalApplication);
+      // Ensure billing client is initialized with official RSA key
+      try {
+        await MyketIAP.init(rsaKey: _myketRsaKey, enableDebugLogging: false);
+      } catch (_) {}
+
+      final dynamic buyRes = await MyketIAP.launchPurchaseFlow(
+        sku: sku,
+        payload: _userToken,
+      );
+
+      final IabResult? iabResult = buyRes[MyketIAP.RESULT];
+      final Purchase? purchase = buyRes[MyketIAP.PURCHASE];
+
+      if (iabResult != null && iabResult.isSuccess() && purchase != null) {
+        final purchaseToken = purchase.mToken;
+        _showToast('تراکنش با موفقیت انجام شد، در حال ثبت اشتراک...');
+
+        // Auto-consume consumable purchase so it can be renewed/repurchased
+        try {
+          await MyketIAP.consume(purchase: purchase);
+        } catch (_) {}
+
+        final valRes = await ApiService.verifyMyketPurchase(
+          token: _userToken!,
+          sku: sku,
+          purchaseToken: purchaseToken,
+        );
+        if (valRes['success'] == true) {
+          _showToast('اشتراک شما با موفقیت فعال شد!');
+          _refreshUserProfile();
+          setState(() {
+            _selectedTabIndex = 0; // Return to Home
+          });
+        } else {
+          _showToast(valRes['message'] ?? 'خطا در تایید اشتراک مایکت');
           return;
         }
+      } else {
+        if (iabResult != null && iabResult.mResponse == 1) { // USER_CANCELED
+          _showToast('پرداخت توسط شما لغو شد.');
+        } else if (iabResult != null && iabResult.mResponse == 7) { // ITEM_ALREADY_OWNED
+          _showToast('اشتراک قبلی شناسایی شد. در حال مصرف و بازیابی...');
+          try {
+            final invMap = await MyketIAP.queryInventory(querySkuDetails: false);
+            final Inventory? inv = invMap[MyketIAP.INVENTORY];
+            final owned = inv?.mPurchaseMap[sku];
+            if (owned != null) {
+              await MyketIAP.consume(purchase: owned);
+              _showToast('لطفاً مجدداً دکمه پرداخت را لمس فرمایید.');
+            }
+          } catch (_) {}
+        } else {
+          _showToast(iabResult?.mMessage ?? 'پرداخت انجام نشد.');
+        }
       }
-      _showToast('درگاه پرداخت نامعتبر یا ناامن شناسایی شد.');
-    } else {
-      _showToast(res['message'] ?? 'خطا در ایجاد درگاه پرداخت.');
+    } catch (e) {
+      _showToast('خطا در اجرای فرآیند خرید مایکت.');
     }
   }
 

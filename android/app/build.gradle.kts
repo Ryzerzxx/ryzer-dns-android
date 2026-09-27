@@ -27,6 +27,10 @@ android {
         // flag during build.
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+
+        manifestPlaceholders["marketApplicationId"] = "ir.mservices.market"
+        manifestPlaceholders["marketBindAddress"] = "ir.mservices.market.InAppBillingService.BIND"
+        manifestPlaceholders["marketPermission"] = "ir.mservices.market.BILLING"
     }
 
     buildFeatures {

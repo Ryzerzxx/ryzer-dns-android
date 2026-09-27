@@ -5,6 +5,14 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SYSTEM_EXEMPTED" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="ir.mservices.market.BILLING" />
+
+    <queries>
+        <package android:name="ir.mservices.market" />
+        <intent>
+            <action android:name="ir.mservices.market.InAppBillingService.BIND" />
+        </intent>
+    </queries>
 
     <application
         android:label="RyzerDNS"
