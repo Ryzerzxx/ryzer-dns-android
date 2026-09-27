@@ -1171,7 +1171,7 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
           _showToast('اشتراک شما با موفقیت فعال شد!');
           _refreshUserProfile();
           setState(() {
-            _selectedTabIndex = 0; // Return to Home
+            _currentNavIndex = 0; // Return to Home
           });
         } else {
           _showToast(valRes['message'] ?? 'خطا در تایید اشتراک مایکت');
