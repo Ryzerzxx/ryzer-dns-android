@@ -15,11 +15,17 @@ import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.net.DatagramPacket
 import java.net.DatagramSocket
-import java.net.HttpURLConnection
 import java.net.InetAddress
-import java.net.URL
+import java.net.InetSocketAddress
+import java.security.SecureRandom
+import java.security.cert.X509Certificate
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
+import javax.net.ssl.SNIHostName
+import javax.net.ssl.SSLContext
+import javax.net.ssl.SSLSocket
+import javax.net.ssl.TrustManager
+import javax.net.ssl.X509TrustManager
 
 class RyzerDnsVpnService : VpnService() {
 
@@ -27,6 +33,14 @@ class RyzerDnsVpnService : VpnService() {
     private var dohWorkerThread: Thread? = null
     private val isDohRunning = AtomicBoolean(false)
     private val threadPool = Executors.newFixedThreadPool(8)
+
+    private val targetServerIp = byteArrayOf(87.toByte(), 248.toByte(), 145.toByte(), 40.toByte())
+
+    private val trustAllCerts = object : X509TrustManager {
+        override fun getAcceptedIssuers(): Array<X509Certificate> = arrayOf()
+        override fun checkClientTrusted(certs: Array<X509Certificate>, authType: String) {}
+        override fun checkServerTrusted(certs: Array<X509Certificate>, authType: String) {}
+    }
 
     companion object {
         const val ACTION_START = "ir.ryzerdns.START_VPN"
@@ -42,8 +56,7 @@ class RyzerDnsVpnService : VpnService() {
                 val primaryDns = intent.getStringExtra("primary_dns") ?: "87.248.145.40"
                 val secondaryDns = intent.getStringExtra("secondary_dns") ?: "143.20.60.94"
                 val enableDoh = intent.getBooleanExtra("enable_doh", false)
-                val dohUrl = intent.getStringExtra("doh_url") ?: "https://ryzerdns.ir/dns-query"
-                startDns(primaryDns, secondaryDns, enableDoh, dohUrl)
+                startDns(primaryDns, secondaryDns, enableDoh)
             }
             ACTION_STOP -> {
                 stopDns()
@@ -64,7 +77,7 @@ class RyzerDnsVpnService : VpnService() {
         }
     }
 
-    private fun startDns(primaryDns: String, secondaryDns: String, enableDoh: Boolean, dohUrl: String) {
+    private fun startDns(primaryDns: String, secondaryDns: String, enableDoh: Boolean) {
         if (isRunning) return
 
         createNotificationChannel()
@@ -75,7 +88,7 @@ class RyzerDnsVpnService : VpnService() {
         )
 
         val title = if (enableDoh) "اتصال فوق‌العاده RyzerDNS فعال است" else "RyzerDNS فعال است"
-        val subtitle = if (enableDoh) "پروتکل رمزنگاری‌شده DoH فعال شد" else "مسیرهای شبکه و بازی‌ها بهینه‌سازی شد"
+        val subtitle = if (enableDoh) "پروتکل رمزنگاری‌شده DoH / DoT فعال شد" else "مسیرهای شبکه و بازی‌ها بهینه‌سازی شد"
 
         val notification: Notification = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             Notification.Builder(this, CHANNEL_ID)
@@ -112,14 +125,16 @@ class RyzerDnsVpnService : VpnService() {
         try {
             val builder = Builder()
             builder.setSession(if (enableDoh) "RyzerDNS-Ultra" else "RyzerDNS")
-                .addAddress("10.0.0.2", 24)
 
             if (enableDoh) {
-                // Route DNS queries to local TUN address so the DoH worker intercepts them
-                builder.addDnsServer("10.0.0.2")
-                builder.addRoute("10.0.0.2", 32)
-                Log.i(TAG, "Configuring Ultra Connection with DoH URL: $dohUrl")
+                // Intercept DNS on virtual remote address 10.111.222.2 (subnet /30)
+                // Interface address: 10.111.222.1
+                builder.addAddress("10.111.222.1", 30)
+                builder.addDnsServer("10.111.222.2")
+                builder.addRoute("10.111.222.2", 32)
+                Log.i(TAG, "Configuring Ultra Connection (Virtual DNS: 10.111.222.2 -> DoT/DoH)")
             } else {
+                builder.addAddress("10.0.0.2", 24)
                 builder.addDnsServer(primaryDns)
                 builder.addDnsServer(secondaryDns)
                 Log.d(TAG, "Configuring Standard DNS: [$primaryDns, $secondaryDns]")
@@ -147,7 +162,7 @@ class RyzerDnsVpnService : VpnService() {
             isRunning = true
 
             if (enableDoh && pfd != null) {
-                startDohWorker(pfd, dohUrl, primaryDns)
+                startDohWorker(pfd)
             }
 
             Log.i(TAG, "RyzerDNS Engine successfully established (enableDoh=$enableDoh)")
@@ -157,7 +172,7 @@ class RyzerDnsVpnService : VpnService() {
         }
     }
 
-    private fun startDohWorker(pfd: ParcelFileDescriptor, dohUrl: String, fallbackDns: String) {
+    private fun startDohWorker(pfd: ParcelFileDescriptor) {
         isDohRunning.set(true)
         val inStream = FileInputStream(pfd.fileDescriptor)
         val outStream = FileOutputStream(pfd.fileDescriptor)
@@ -201,7 +216,7 @@ class RyzerDnsVpnService : VpnService() {
                     // Process DNS asynchronously in threadPool
                     threadPool.execute {
                         try {
-                            val dnsResp = queryDoh(dnsQuery, dohUrl, fallbackDns)
+                            val dnsResp = queryEncryptedDns(dnsQuery)
                             if (dnsResp != null && dnsResp.isNotEmpty()) {
                                 val replyPacket = buildIpv4UdpPacket(dstIp, srcIp, 53, srcPort, dnsResp)
                                 synchronized(outStream) {
@@ -225,42 +240,123 @@ class RyzerDnsVpnService : VpnService() {
         }
     }
 
-    private fun queryDoh(dnsQuery: ByteArray, dohUrl: String, fallbackDns: String): ByteArray? {
-        // 1. Try DoH POST
+    private fun queryEncryptedDns(dnsQuery: ByteArray): ByteArray? {
+        val serverAddr = InetAddress.getByAddress(targetServerIp)
+
+        // 1. Try DoT (TLS on 87.248.145.40:853) - Super fast RFC 7858, no HTTP overhead!
         try {
-            val url = URL(dohUrl)
-            val conn = (url.openConnection() as HttpURLConnection).apply {
-                requestMethod = "POST"
-                doOutput = true
-                doInput = true
-                connectTimeout = 3000
-                readTimeout = 3500
-                setRequestProperty("Content-Type", "application/dns-message")
-                setRequestProperty("Accept", "application/dns-message")
-                setRequestProperty("User-Agent", "RyzerDNS-Android/1.0.3")
+            val sslContext = SSLContext.getInstance("TLS")
+            sslContext.init(null, arrayOf<TrustManager>(trustAllCerts), SecureRandom())
+            val socket = sslContext.socketFactory.createSocket() as SSLSocket
+            protect(socket)
+            socket.soTimeout = 2500
+
+            val sslParams = socket.sslParameters
+            sslParams.serverNames = listOf(SNIHostName("dns.ryzerdns.ir"))
+            socket.sslParameters = sslParams
+
+            socket.connect(InetSocketAddress(serverAddr, 853), 2000)
+            socket.startHandshake()
+
+            val out = socket.outputStream
+            val inp = socket.inputStream
+
+            // Write 2-byte length prefix + DNS query
+            out.write((dnsQuery.size shr 8) and 0xFF)
+            out.write(dnsQuery.size and 0xFF)
+            out.write(dnsQuery)
+            out.flush()
+
+            val b1 = inp.read()
+            val b2 = inp.read()
+            if (b1 != -1 && b2 != -1) {
+                val respLen = (b1 shl 8) or b2
+                val respData = ByteArray(respLen)
+                var totalRead = 0
+                while (totalRead < respLen) {
+                    val r = inp.read(respData, totalRead, respLen - totalRead)
+                    if (r == -1) break
+                    totalRead += r
+                }
+                socket.close()
+                if (totalRead == respLen) {
+                    return respData
+                }
             }
-            conn.outputStream.use { it.write(dnsQuery) }
-            if (conn.responseCode == 200) {
-                return conn.inputStream.use { it.readBytes() }
-            }
+            socket.close()
         } catch (_: Exception) {}
 
-        // 2. Fallback to direct protected UDP query to fallbackDns (87.248.145.40:53)
+        // 2. Try DoH (HTTPS on 87.248.145.40:8445 with Host: ryzerdns.ir)
         try {
-            DatagramSocket().use { socket ->
-                protect(socket)
-                socket.soTimeout = 2500
+            val sslContext = SSLContext.getInstance("TLS")
+            sslContext.init(null, arrayOf<TrustManager>(trustAllCerts), SecureRandom())
+            val socket = sslContext.socketFactory.createSocket() as SSLSocket
+            protect(socket)
+            socket.soTimeout = 2500
+
+            val sslParams = socket.sslParameters
+            sslParams.serverNames = listOf(SNIHostName("ryzerdns.ir"))
+            socket.sslParameters = sslParams
+
+            socket.connect(InetSocketAddress(serverAddr, 8445), 2000)
+            socket.startHandshake()
+
+            val out = socket.outputStream
+            val inp = socket.inputStream
+
+            val httpHeader = ("POST /dns-query HTTP/1.1\r\n" +
+                "Host: ryzerdns.ir\r\n" +
+                "Content-Type: application/dns-message\r\n" +
+                "Accept: application/dns-message\r\n" +
+                "Content-Length: ${dnsQuery.size}\r\n" +
+                "Connection: close\r\n\r\n").toByteArray(Charsets.US_ASCII)
+
+            out.write(httpHeader)
+            out.write(dnsQuery)
+            out.flush()
+
+            // Read HTTP response until headers end (\r\n\r\n)
+            val headerBuf = ByteArray(2048)
+            var hLen = 0
+            var bodyFound = false
+            while (hLen < headerBuf.size) {
+                val b = inp.read()
+                if (b == -1) break
+                headerBuf[hLen++] = b.toByte()
+                if (hLen >= 4 &&
+                    headerBuf[hLen - 4] == 0x0D.toByte() && headerBuf[hLen - 3] == 0x0A.toByte() &&
+                    headerBuf[hLen - 2] == 0x0D.toByte() && headerBuf[hLen - 1] == 0x0A.toByte()) {
+                    bodyFound = true
+                    break
+                }
+            }
+
+            if (bodyFound) {
+                val respBytes = inp.readBytes()
+                socket.close()
+                if (respBytes.isNotEmpty()) {
+                    return respBytes
+                }
+            }
+            socket.close()
+        } catch (_: Exception) {}
+
+        // 3. Fallback: Direct Raw UDP query to 87.248.145.40:53
+        try {
+            DatagramSocket().use { udpSocket ->
+                protect(udpSocket)
+                udpSocket.soTimeout = 2000
                 val sendPacket = DatagramPacket(
                     dnsQuery,
                     dnsQuery.size,
-                    InetAddress.getByName(fallbackDns),
+                    serverAddr,
                     53
                 )
-                socket.send(sendPacket)
+                udpSocket.send(sendPacket)
 
                 val recvBuf = ByteArray(4096)
                 val recvPacket = DatagramPacket(recvBuf, recvBuf.size)
-                socket.receive(recvPacket)
+                udpSocket.receive(recvPacket)
 
                 val result = ByteArray(recvPacket.length)
                 System.arraycopy(recvPacket.data, recvPacket.offset, result, 0, recvPacket.length)
