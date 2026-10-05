@@ -13,6 +13,10 @@ import android.os.ParcelFileDescriptor
 import android.util.Log
 import java.io.FileInputStream
 import java.io.FileOutputStream
+import java.io.InputStream
+import java.io.OutputStream
+import java.net.DatagramPacket
+import java.net.DatagramSocket
 import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.Socket
@@ -33,11 +37,24 @@ class RyzerDnsVpnService : VpnService() {
     private val threadPool = Executors.newFixedThreadPool(8)
     private val localDnsCache = ConcurrentHashMap<String, Pair<Long, ByteArray>>()
 
+    private val targetServerIpBytes = byteArrayOf(87.toByte(), 248.toByte(), 145.toByte(), 40.toByte())
+    private val targetServerHost = "dns.ryzerdns.ir"
+
     private val trustAllCerts = object : X509TrustManager {
         override fun getAcceptedIssuers(): Array<X509Certificate> = arrayOf()
         override fun checkClientTrusted(certs: Array<X509Certificate>, authType: String) {}
         override fun checkServerTrusted(certs: Array<X509Certificate>, authType: String) {}
     }
+
+    // Pending query structure for DoT pipelining
+    data class PendingQuery(
+        val clientIp: ByteArray,
+        val clientPort: Int,
+        val timestamp: Long
+    )
+
+    private val pendingQueries = ConcurrentHashMap<Int, PendingQuery>()
+    private val dotClient = DotClient()
 
     companion object {
         const val ACTION_START = "ir.ryzerdns.START_VPN"
@@ -86,8 +103,8 @@ class RyzerDnsVpnService : VpnService() {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) PendingIntent.FLAG_IMMUTABLE else 0
         )
 
-        val title = if (enableDoh) "اتصال فوق‌العاده RyzerDNS فعال است" else "RyzerDNS فعال است"
-        val subtitle = if (enableDoh) "پروتکل رمزنگاری‌شده DoH فعال شد" else "مسیرهای شبکه و بازی‌ها بهینه‌سازی شد"
+        val title = if (enableDoh) "اتصال فوق‌العاده RyzerDNS (DoT) فعال است" else "RyzerDNS فعال است"
+        val subtitle = if (enableDoh) "پروتکل رمزنگاری‌شده DoT فعال شد" else "مسیرهای شبکه و بازی‌ها بهینه‌سازی شد"
 
         val notification: Notification = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             Notification.Builder(this, CHANNEL_ID)
@@ -132,7 +149,7 @@ class RyzerDnsVpnService : VpnService() {
                 builder.addAddress("10.111.222.1", 30)
                 builder.addDnsServer("10.111.222.2")
                 builder.addRoute("10.111.222.2", 32)
-                Log.i(TAG, "Configuring Ultra Connection with Virtual DNS 10.111.222.2")
+                Log.i(TAG, "Configuring Ultra Connection with Virtual DNS 10.111.222.2 (DoT)")
             } else {
                 builder.addAddress("10.0.0.2", 24)
                 builder.addDnsServer(primaryDns)
@@ -177,9 +194,12 @@ class RyzerDnsVpnService : VpnService() {
         val inStream = FileInputStream(pfd.fileDescriptor)
         val outStream = FileOutputStream(pfd.fileDescriptor)
 
+        // Initialize and warm up the persistent DoT socket
+        dotClient.init(outStream)
+
         dohWorkerThread = Thread {
             val packet = ByteArray(32768)
-            Log.i(TAG, "DoH TUN Worker thread started")
+            Log.i(TAG, "DoT TUN Worker thread started")
 
             while (isDohRunning.get()) {
                 try {
@@ -228,7 +248,25 @@ class RyzerDnsVpnService : VpnService() {
                         }
                     }
 
-                    // 2. Handle UDP Port 53 DNS Queries
+                    // 2. Reject TCP on Port 53 / 853 with TCP RST so Android does not hang
+                    if (protocol == 6) {
+                        val dstPort = ((packet[ihl + 2].toInt() and 0xFF) shl 8) or (packet[ihl + 3].toInt() and 0xFF)
+                        if (dstPort == 53 || dstPort == 853) {
+                            val srcPort = ((packet[ihl].toInt() and 0xFF) shl 8) or (packet[ihl + 1].toInt() and 0xFF)
+                            val clientIp = ByteArray(4)
+                            System.arraycopy(packet, 12, clientIp, 0, 4)
+                            val dnsServerIp = ByteArray(4)
+                            System.arraycopy(packet, 16, dnsServerIp, 0, 4)
+                            val rstPacket = buildTcpRstPacket(dnsServerIp, clientIp, dstPort, srcPort)
+                            synchronized(outStream) {
+                                outStream.write(rstPacket)
+                                outStream.flush()
+                            }
+                            continue
+                        }
+                    }
+
+                    // 3. Handle UDP Port 53 DNS Queries
                     if (protocol != 17) continue // UDP only
 
                     val srcPort = ((packet[ihl].toInt() and 0xFF) shl 8) or (packet[ihl + 1].toInt() and 0xFF)
@@ -247,157 +285,238 @@ class RyzerDnsVpnService : VpnService() {
                     val dnsQuery = ByteArray(dnsPayloadLen)
                     System.arraycopy(packet, ihl + 8, dnsQuery, 0, dnsPayloadLen)
 
-                    // Process DNS asynchronously
-                    threadPool.execute {
-                        try {
-                            val dnsResp = queryDohWithCache(dnsQuery)
-                            if (dnsResp != null && dnsResp.isNotEmpty()) {
-                                val replyPacket = buildIpv4UdpPacket(dnsServerIp, clientIp, 53, srcPort, dnsResp)
-                                synchronized(outStream) {
-                                    outStream.write(replyPacket)
-                                    outStream.flush()
-                                }
+                    val txId = ((dnsQuery[0].toInt() and 0xFF) shl 8) or (dnsQuery[1].toInt() and 0xFF)
+
+                    // 4. Check Fast In-Memory Cache first
+                    val cacheKey = getDnsQuestionKey(dnsQuery)
+                    val now = System.currentTimeMillis()
+                    if (cacheKey != null) {
+                        val cached = localDnsCache[cacheKey]
+                        if (cached != null && now < cached.first) {
+                            val cachedResp = cached.second.copyOf()
+                            cachedResp[0] = dnsQuery[0]
+                            cachedResp[1] = dnsQuery[1]
+                            val replyPacket = buildIpv4UdpPacket(dnsServerIp, clientIp, 53, srcPort, cachedResp)
+                            synchronized(outStream) {
+                                outStream.write(replyPacket)
+                                outStream.flush()
                             }
-                        } catch (e: Exception) {
-                            Log.w(TAG, "Error handling DNS query: ${e.message}")
+                            continue
                         }
+                    }
+
+                    // 5. Forward via Pipelined DoT Client
+                    threadPool.execute {
+                        dotClient.forwardQuery(txId, clientIp, srcPort, dnsServerIp, dnsQuery, cacheKey)
                     }
                 } catch (e: Exception) {
                     if (!isDohRunning.get()) break
                     Log.w(TAG, "TUN read error: ${e.message}")
                 }
             }
-            Log.i(TAG, "DoH TUN Worker thread stopped")
+            Log.i(TAG, "DoT TUN Worker thread stopped")
         }.apply {
-            name = "RyzerDnsDoHWorker"
+            name = "RyzerDnsDoTWorker"
             isDaemon = true
             start()
         }
     }
 
-    private fun queryDohWithCache(dnsQuery: ByteArray): ByteArray? {
-        val cacheKey = getDnsQuestionKey(dnsQuery)
-        val now = System.currentTimeMillis()
+    inner class DotClient {
+        private var socket: SSLSocket? = null
+        private var outStream: OutputStream? = null
+        private var tunOutStream: FileOutputStream? = null
+        private var readerThread: Thread? = null
+        private val lock = Any()
 
-        // 1. Check in-memory fast cache
-        if (cacheKey != null) {
-            val cached = localDnsCache[cacheKey]
-            if (cached != null && now < cached.first) {
-                val cachedResp = cached.second.copyOf()
-                // Patch Transaction ID to match current query
-                if (dnsQuery.size >= 2 && cachedResp.size >= 2) {
-                    cachedResp[0] = dnsQuery[0]
-                    cachedResp[1] = dnsQuery[1]
+        fun init(tunOut: FileOutputStream) {
+            this.tunOutStream = tunOut
+            ensureConnected()
+        }
+
+        private fun ensureConnected(): Boolean {
+            synchronized(lock) {
+                if (socket != null && socket?.isConnected == true && socket?.isClosed == false) {
+                    return true
                 }
-                return cachedResp
+                closeSocket()
+
+                try {
+                    val serverAddr = InetAddress.getByAddress(targetServerIpBytes)
+                    val sslContext = SSLContext.getInstance("TLS")
+                    sslContext.init(null, arrayOf<TrustManager>(trustAllCerts), null)
+
+                    val plainSocket = Socket()
+                    protect(plainSocket)
+                    plainSocket.tcpNoDelay = true
+                    plainSocket.soTimeout = 0 // Infinite read timeout for long-lived multiplexed receiver
+                    plainSocket.connect(InetSocketAddress(serverAddr, 853), 2000)
+
+                    val sslSocket = sslContext.socketFactory.createSocket(
+                        plainSocket,
+                        targetServerHost,
+                        853,
+                        true
+                    ) as SSLSocket
+                    sslSocket.soTimeout = 0
+                    sslSocket.startHandshake()
+
+                    socket = sslSocket
+                    outStream = sslSocket.outputStream
+                    startReader(sslSocket.inputStream)
+                    Log.i(TAG, "Pipelined DoT Connection established to $targetServerHost:853")
+                    return true
+                } catch (e: Exception) {
+                    Log.w(TAG, "Failed to connect DoT socket: ${e.message}")
+                    closeSocket()
+                    return false
+                }
             }
         }
 
-        // 2. Query DoH Server via direct HTTPS POST
-        val dnsResp = executeDoHPost(dnsQuery)
-        if (dnsResp != null && dnsResp.size >= 12 && cacheKey != null) {
-            // Cache valid responses for 60 seconds
-            localDnsCache[cacheKey] = Pair(now + 60_000L, dnsResp)
-        }
-        return dnsResp
-    }
+        private fun startReader(inp: InputStream) {
+            readerThread?.interrupt()
+            readerThread = Thread {
+                val lenBuf = ByteArray(2)
+                while (isDohRunning.get()) {
+                    try {
+                        var r = 0
+                        while (r < 2) {
+                            val count = inp.read(lenBuf, r, 2 - r)
+                            if (count <= 0) break
+                            r += count
+                        }
+                        if (r < 2) break
 
-    private fun executeDoHPost(dnsQuery: ByteArray): ByteArray? {
-        // Direct IPs to bypass DNS recursive lookups completely:
-        // Primary: Iran Edge (87.248.145.40:8445)
-        // Fallback: Germany Main Server (143.20.60.94:443)
-        val endpoints = listOf(
-            Pair("87.248.145.40", 8445),
-            Pair("143.20.60.94", 443)
-        )
+                        val msgLen = ((lenBuf[0].toInt() and 0xFF) shl 8) or (lenBuf[1].toInt() and 0xFF)
+                        if (msgLen <= 0 || msgLen > 4096) continue
 
-        for ((hostIp, port) in endpoints) {
-            try {
-                val serverAddr = InetAddress.getByName(hostIp)
-                val sslContext = SSLContext.getInstance("TLS")
-                sslContext.init(null, arrayOf<TrustManager>(trustAllCerts), null)
+                        val respBuf = ByteArray(msgLen)
+                        var totalRead = 0
+                        while (totalRead < msgLen) {
+                            val count = inp.read(respBuf, totalRead, msgLen - totalRead)
+                            if (count <= 0) break
+                            totalRead += count
+                        }
+                        if (totalRead != msgLen) break
 
-                val plainSocket = Socket()
-                protect(plainSocket)
-                plainSocket.tcpNoDelay = true
-                plainSocket.soTimeout = 2500
-                plainSocket.connect(InetSocketAddress(serverAddr, port), 1200)
+                        // Extract Transaction ID
+                        val txId = ((respBuf[0].toInt() and 0xFF) shl 8) or (respBuf[1].toInt() and 0xFF)
+                        val pending = pendingQueries.remove(txId)
 
-                val sslSocket = sslContext.socketFactory.createSocket(
-                    plainSocket,
-                    "ryzerdns.ir",
-                    port,
-                    true
-                ) as SSLSocket
-                sslSocket.soTimeout = 2500
-                sslSocket.startHandshake()
+                        if (pending != null && tunOutStream != null) {
+                            val replyPacket = buildIpv4UdpPacket(
+                                byteArrayOf(10.toByte(), 111.toByte(), 222.toByte(), 2.toByte()),
+                                pending.clientIp,
+                                53,
+                                pending.clientPort,
+                                respBuf
+                            )
+                            synchronized(tunOutStream!!) {
+                                tunOutStream!!.write(replyPacket)
+                                tunOutStream!!.flush()
+                            }
 
-                val out = sslSocket.outputStream
-                val inp = sslSocket.inputStream
-
-                val requestHeader = ("POST /dns-query HTTP/1.1\r\n" +
-                    "Host: ryzerdns.ir\r\n" +
-                    "Content-Type: application/dns-message\r\n" +
-                    "Accept: application/dns-message\r\n" +
-                    "Content-Length: ${dnsQuery.size}\r\n" +
-                    "Connection: close\r\n\r\n").toByteArray(Charsets.US_ASCII)
-
-                out.write(requestHeader)
-                out.write(dnsQuery)
-                out.flush()
-
-                // Read HTTP response header and exact Content-Length body
-                val buffer = ByteArray(4096)
-                var totalBytesRead = 0
-                var bodyStartIndex = -1
-                var contentLength = -1
-
-                while (totalBytesRead < buffer.size) {
-                    val count = inp.read(buffer, totalBytesRead, buffer.size - totalBytesRead)
-                    if (count <= 0) break
-                    totalBytesRead += count
-
-                    // Find end of HTTP headers (\r\n\r\n)
-                    if (bodyStartIndex == -1) {
-                        for (i in 0 until totalBytesRead - 3) {
-                            if (buffer[i] == 0x0D.toByte() && buffer[i+1] == 0x0A.toByte() &&
-                                buffer[i+2] == 0x0D.toByte() && buffer[i+3] == 0x0A.toByte()) {
-                                bodyStartIndex = i + 4
-                                val headerStr = String(buffer, 0, i, Charsets.US_ASCII)
-                                val clPrefix = "content-length:"
-                                for (line in headerStr.lines()) {
-                                    if (line.lowercase().startsWith(clPrefix)) {
-                                        contentLength = line.substring(clPrefix.length).trim().toIntOrNull() ?: -1
-                                    }
-                                }
-                                break
+                            // Save to cache for 60 seconds
+                            val cacheKey = getDnsQuestionKey(respBuf)
+                            if (cacheKey != null) {
+                                localDnsCache[cacheKey] = Pair(System.currentTimeMillis() + 60_000L, respBuf)
                             }
                         }
+                    } catch (e: Exception) {
+                        break
                     }
+                }
+                synchronized(lock) {
+                    closeSocket()
+                }
+            }.apply {
+                name = "DoT-ResponseReader"
+                isDaemon = true
+                start()
+            }
+        }
 
-                    if (bodyStartIndex != -1) {
-                        val bodyBytesReceived = totalBytesRead - bodyStartIndex
-                        if (contentLength != -1 && bodyBytesReceived >= contentLength) {
-                            val dnsPayload = ByteArray(contentLength)
-                            System.arraycopy(buffer, bodyStartIndex, dnsPayload, 0, contentLength)
-                            sslSocket.close()
-                            return dnsPayload
+        fun forwardQuery(
+            txId: Int,
+            clientIp: ByteArray,
+            clientPort: Int,
+            dnsServerIp: ByteArray,
+            dnsQuery: ByteArray,
+            cacheKey: String?
+        ) {
+            pendingQueries[txId] = PendingQuery(clientIp, clientPort, System.currentTimeMillis())
+
+            var sent = false
+            if (ensureConnected()) {
+                synchronized(lock) {
+                    try {
+                        val out = outStream
+                        if (out != null) {
+                            val len = dnsQuery.size
+                            out.write((len shr 8) and 0xFF)
+                            out.write(len and 0xFF)
+                            out.write(dnsQuery)
+                            out.flush()
+                            sent = true
+                        }
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Error writing to DoT socket: ${e.message}")
+                        closeSocket()
+                    }
+                }
+            }
+
+            // Fallback: If DoT write failed, send via protected direct UDP query to 87.248.145.40:53
+            if (!sent) {
+                pendingQueries.remove(txId)
+                executeUdpFallback(clientIp, clientPort, dnsServerIp, dnsQuery)
+            }
+        }
+
+        private fun executeUdpFallback(
+            clientIp: ByteArray,
+            clientPort: Int,
+            dnsServerIp: ByteArray,
+            dnsQuery: ByteArray
+        ) {
+            try {
+                DatagramSocket().use { socket ->
+                    protect(socket)
+                    socket.soTimeout = 2000
+                    val sendPacket = DatagramPacket(
+                        dnsQuery,
+                        dnsQuery.size,
+                        InetAddress.getByAddress(targetServerIpBytes),
+                        53
+                    )
+                    socket.send(sendPacket)
+
+                    val recvBuf = ByteArray(4096)
+                    val recvPacket = DatagramPacket(recvBuf, recvBuf.size)
+                    socket.receive(recvPacket)
+
+                    val resp = ByteArray(recvPacket.length)
+                    System.arraycopy(recvPacket.data, recvPacket.offset, resp, 0, recvPacket.length)
+
+                    if (tunOutStream != null) {
+                        val replyPacket = buildIpv4UdpPacket(dnsServerIp, clientIp, 53, clientPort, resp)
+                        synchronized(tunOutStream!!) {
+                            tunOutStream!!.write(replyPacket)
+                            tunOutStream!!.flush()
                         }
                     }
                 }
-
-                sslSocket.close()
-                if (bodyStartIndex != -1 && totalBytesRead > bodyStartIndex) {
-                    val bodyLen = if (contentLength > 0) contentLength else (totalBytesRead - bodyStartIndex)
-                    val dnsPayload = ByteArray(bodyLen)
-                    System.arraycopy(buffer, bodyStartIndex, dnsPayload, 0, bodyLen)
-                    return dnsPayload
-                }
             } catch (e: Exception) {
-                Log.d(TAG, "DoH query to $hostIp:$port failed: ${e.message}")
+                Log.w(TAG, "UDP fallback failed: ${e.message}")
             }
         }
-        return null
+
+        fun closeSocket() {
+            try { socket?.close() } catch (_: Exception) {}
+            socket = null
+            outStream = null
+        }
     }
 
     private fun getDnsQuestionKey(query: ByteArray): String? {
@@ -418,6 +537,52 @@ class RyzerDnsVpnService : VpnService() {
             return "$sb:$qtype:$qclass"
         }
         return null
+    }
+
+    private fun buildTcpRstPacket(
+        srcIp: ByteArray,
+        dstIp: ByteArray,
+        srcPort: Int,
+        dstPort: Int
+    ): ByteArray {
+        val packet = ByteArray(40)
+        packet[0] = 0x45.toByte() // IPv4, IHL 5
+        packet[1] = 0x00.toByte()
+        packet[2] = 0.toByte()
+        packet[3] = 40.toByte() // Total length 40
+        packet[4] = 0x12.toByte()
+        packet[5] = 0x34.toByte()
+        packet[6] = 0x40.toByte() // Don't fragment
+        packet[7] = 0x00.toByte()
+        packet[8] = 64.toByte()   // TTL
+        packet[9] = 6.toByte()    // Protocol TCP = 6
+        System.arraycopy(srcIp, 0, packet, 12, 4)
+        System.arraycopy(dstIp, 0, packet, 16, 4)
+
+        // Compute IP Checksum
+        val ipChecksum = computeChecksum(packet, 0, 20)
+        packet[10] = ((ipChecksum shr 8) and 0xFF).toByte()
+        packet[11] = (ipChecksum and 0xFF).toByte()
+
+        // TCP Header (20 bytes)
+        packet[20] = ((srcPort shr 8) and 0xFF).toByte()
+        packet[21] = (srcPort and 0xFF).toByte()
+        packet[22] = ((dstPort shr 8) and 0xFF).toByte()
+        packet[23] = (dstPort and 0xFF).toByte()
+        // Seq number = 0
+        packet[24] = 0
+        packet[25] = 0
+        packet[26] = 0
+        packet[27] = 0
+        // Data offset 5 (20 bytes)
+        packet[32] = 0x50.toByte()
+        // Flags: RST + ACK (0x14)
+        packet[33] = 0x14.toByte()
+        // Window size
+        packet[34] = 0
+        packet[35] = 0
+
+        return packet
     }
 
     private fun buildIpv4UdpPacket(
@@ -460,7 +625,6 @@ class RyzerDnsVpnService : VpnService() {
         packet[24] = ((udpLen shr 8) and 0xFF).toByte()
         packet[25] = (udpLen and 0xFF).toByte()
         packet[26] = 0.toByte()
-        packet[27] = 0.toByte()
 
         // Payload
         System.arraycopy(payload, 0, packet, 28, payload.size)
@@ -536,7 +700,9 @@ class RyzerDnsVpnService : VpnService() {
 
     private fun stopDns() {
         isDohRunning.set(false)
+        dotClient.closeSocket()
         localDnsCache.clear()
+        pendingQueries.clear()
         try {
             vpnInterface?.close()
             vpnInterface = null
