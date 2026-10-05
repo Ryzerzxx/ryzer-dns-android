@@ -4,10 +4,6 @@ import 'package:flutter/services.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
-import 'package:myket_iap/myket_iap.dart';
-import 'package:myket_iap/util/iab_result.dart';
-import 'package:myket_iap/util/inventory.dart';
-import 'package:myket_iap/util/purchase.dart';
 import 'api_service.dart';
 import 'vpn_manager.dart';
 
@@ -88,10 +84,6 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
     _fetchRemoteConfig();
     _loadTickets();
   }
-
-  static const String _myketRsaKey = "MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQCSFZFMD07zzp9eOG95m3Swifaa9unu21AJqjNVKKc/EuGHa7OWlCymw4ngTIQI4gYN3Je7UNavxl7bM+yUJrQpELAQvvUdEoLjR6Prja3Lk9BMvibgbYEGRHiM9avLSt3kRSIruJntUh3/CeNL9DhL/pZzwxeOURv92zmqenoQMwIDAQAB";
-
-  void _initMyketBilling() async {}
 
   Future<void> _fetchRemoteConfig() async {
     final cfg = await ApiService.getRemoteConfig();
