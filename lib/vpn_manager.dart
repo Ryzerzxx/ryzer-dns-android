@@ -5,11 +5,18 @@ import 'package:flutter/services.dart';
 class VpnManager {
   static const MethodChannel _channel = MethodChannel('ir.ryzerdns/vpn');
 
-  static Future<bool> startVpn({required String primaryDns, required String secondaryDns}) async {
+  static Future<bool> startVpn({
+    required String primaryDns,
+    required String secondaryDns,
+    bool enableDoh = false,
+    String dohUrl = 'https://ryzerdns.ir/dns-query',
+  }) async {
     try {
       final bool result = await _channel.invokeMethod('startVpn', {
         'primary_dns': primaryDns,
         'secondary_dns': secondaryDns,
+        'enable_doh': enableDoh,
+        'doh_url': dohUrl,
       });
       return result;
     } catch (_) {

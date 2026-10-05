@@ -34,12 +34,18 @@ jobs:
           flutter build apk --release
           find build -name "*.apk" -ls
 
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ryzer-dns-release-apk
+          path: build/app/outputs/flutter-apk/app-release.apk
+
       - name: Create Release & Upload APK
         uses: softprops/action-gh-release@v2
         if: startsWith(github.ref, 'refs/tags/') || github.ref == 'refs/heads/main'
         with:
-          tag_name: v1.0.2-myket
-          name: RyzerDNS Android v1.0.2 (Myket Release)
+          tag_name: v1.0.3-ultra
+          name: RyzerDNS Android v1.0.3 (Ultra DoH & ZarinPal)
           files: build/app/outputs/flutter-apk/app-release.apk
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

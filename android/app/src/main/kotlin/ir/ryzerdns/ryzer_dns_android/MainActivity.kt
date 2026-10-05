@@ -16,7 +16,9 @@ class MainActivity: FlutterActivity() {
 
     private var pendingResult: MethodChannel.Result? = null
     private var targetPrimaryDns = "87.248.145.40"
-    private var targetSecondaryDns = "46.8.102.223"
+    private var targetSecondaryDns = "143.20.60.94"
+    private var targetEnableDoh = false
+    private var targetDohUrl = "https://ryzerdns.ir/dns-query"
 
     override fun configureFlutterEngine(@NonNull flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -43,7 +45,9 @@ class MainActivity: FlutterActivity() {
                 }
                 "startVpn" -> {
                     targetPrimaryDns = call.argument<String>("primary_dns") ?: "87.248.145.40"
-                    targetSecondaryDns = call.argument<String>("secondary_dns") ?: "46.8.102.223"
+                    targetSecondaryDns = call.argument<String>("secondary_dns") ?: "143.20.60.94"
+                    targetEnableDoh = call.argument<Boolean>("enable_doh") ?: false
+                    targetDohUrl = call.argument<String>("doh_url") ?: "https://ryzerdns.ir/dns-query"
                     
                     val intent = VpnService.prepare(this)
                     if (intent != null) {
@@ -71,6 +75,8 @@ class MainActivity: FlutterActivity() {
             action = RyzerDnsVpnService.ACTION_START
             putExtra("primary_dns", targetPrimaryDns)
             putExtra("secondary_dns", targetSecondaryDns)
+            putExtra("enable_doh", targetEnableDoh)
+            putExtra("doh_url", targetDohUrl)
         }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             startForegroundService(startIntent)

@@ -70,6 +70,7 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
   Timer? _pingTimer;
   late AnimationController _pulseController;
   int _currentNavIndex = 0; // 0: Home, 1: Plans, 2: Support, 3: Settings
+  bool _enableUltraConnection = false;
 
   // 🌐 Server-Driven UI & Remote Config State
   Map<String, dynamic> _remoteConfig = {};
@@ -86,16 +87,11 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
     _loadStoredSession();
     _fetchRemoteConfig();
     _loadTickets();
-    _initMyketBilling();
   }
 
   static const String _myketRsaKey = "MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQCSFZFMD07zzp9eOG95m3Swifaa9unu21AJqjNVKKc/EuGHa7OWlCymw4ngTIQI4gYN3Je7UNavxl7bM+yUJrQpELAQvvUdEoLjR6Prja3Lk9BMvibgbYEGRHiM9avLSt3kRSIruJntUh3/CeNL9DhL/pZzwxeOURv92zmqenoQMwIDAQAB";
 
-  void _initMyketBilling() async {
-    try {
-      await MyketIAP.init(rsaKey: _myketRsaKey, enableDebugLogging: false);
-    } catch (_) {}
-  }
+  void _initMyketBilling() async {}
 
   Future<void> _fetchRemoteConfig() async {
     final cfg = await ApiService.getRemoteConfig();
@@ -106,7 +102,7 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
   }
 
   void _checkAndPromptUpdate(Map<String, dynamic> cfg) {
-    const currentAppVersion = "1.0.1";
+    const currentAppVersion = "1.0.3";
     final latestVersion = cfg['latest_version'] ?? currentAppVersion;
     final isExplicitUpdate = cfg['update_available'] == true;
     final isHigherVersionAvailable = _isVersionLower(currentAppVersion, latestVersion);
@@ -242,6 +238,10 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
   Future<void> _loadStoredSession() async {
     final prefs = await SharedPreferences.getInstance();
     final token = prefs.getString('ryzer_user_token');
+    final ultra = prefs.getBool('enable_ultra_connection') ?? false;
+    setState(() {
+      _enableUltraConnection = ultra;
+    });
     if (token != null && token.isNotEmpty) {
       setState(() => _userToken = token);
       await _refreshUserProfile();
@@ -307,7 +307,9 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
 
       final success = await VpnManager.startVpn(
         primaryDns: '87.248.145.40',
-        secondaryDns: '46.8.102.223',
+        secondaryDns: '143.20.60.94',
+        enableDoh: _enableUltraConnection,
+        dohUrl: 'https://ryzerdns.ir/dns-query',
       );
 
       setState(() {
@@ -316,7 +318,11 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
       });
 
       if (success) {
-        _showToast('سرویس هوشمند RyzerDNS متصل شد.');
+        if (_enableUltraConnection) {
+          _showToast('سرویس اتصال فوق‌العاده RyzerDNS (DoH) فعال شد.');
+        } else {
+          _showToast('سرویس هوشمند RyzerDNS متصل شد.');
+        }
         _refreshPing();
       } else {
         _showToast('اجازه اتصال VPN در سیستم تایید نشد.');
@@ -534,12 +540,94 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
             ),
           ],
           _buildSubscriptionCard(),
-          const SizedBox(height: 36),
+          _buildUltraConnectionToggle(),
+          const SizedBox(height: 28),
           _buildPowerButton(),
-          const SizedBox(height: 36),
+          const SizedBox(height: 28),
           _buildPingAndStatusRow(),
           const SizedBox(height: 24),
           _buildQuickActionsRow(),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildUltraConnectionToggle() {
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.only(top: 14),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      decoration: BoxDecoration(
+        color: const Color(0xFF14141E),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: _enableUltraConnection ? const Color(0xFFFF3B5C).withOpacity(0.6) : const Color(0x1AFFFFFF),
+          width: 1.2,
+        ),
+      ),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: _enableUltraConnection ? const Color(0x26FF3B5C) : const Color(0x0DFFFFFF),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Icon(
+              Icons.bolt_rounded,
+              color: _enableUltraConnection ? const Color(0xFFFF3B5C) : Colors.white54,
+              size: 24,
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    const Text(
+                      'اتصال فوق‌العاده',
+                      style: TextStyle(fontSize: 14, fontWeight: FontWeight.w800, color: Colors.white),
+                    ),
+                    const SizedBox(width: 8),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: _enableUltraConnection ? const Color(0x3300E676) : const Color(0x33FFB800),
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: Text(
+                        _enableUltraConnection ? 'فعال (DoH)' : 'آزمایشی',
+                        style: TextStyle(
+                          fontSize: 10,
+                          fontWeight: FontWeight.w700,
+                          color: _enableUltraConnection ? const Color(0xFF00E676) : const Color(0xFFFFB800),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 2),
+                const Text(
+                  'استفاده از پروتکل رمزنگاری‌شده DoH برای دور زدن فیلترینگ و اختلالات شدید',
+                  style: TextStyle(fontSize: 11, color: Colors.white60, height: 1.3),
+                ),
+              ],
+            ),
+          ),
+          Switch(
+            value: _enableUltraConnection,
+            activeColor: const Color(0xFFFF3B5C),
+            onChanged: (val) async {
+              setState(() => _enableUltraConnection = val);
+              final prefs = await SharedPreferences.getInstance();
+              await prefs.setBool('enable_ultra_connection', val);
+              if (_isConnected) {
+                _showToast('برای اعمال حالت جدید، یک‌بار قطع و دوباره متصل شوید.');
+              }
+            },
+          ),
         ],
       ),
     );
@@ -1135,68 +1223,28 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
 
     if (confirm != true) return;
 
-    // Myket In-App Billing ONLY (Official Myket IAB SDK)
-    final sku = '${tier.toLowerCase()}_${months}m';
+    // 💳 ZarinPal Direct Payment Gateway Flow
     try {
-      _showToast('در حال اتصال به مایکت...');
-
-      // Ensure billing client is initialized with official RSA key
-      try {
-        await MyketIAP.init(rsaKey: _myketRsaKey, enableDebugLogging: false);
-      } catch (_) {}
-
-      final dynamic buyRes = await MyketIAP.launchPurchaseFlow(
-        sku: sku,
-        payload: _userToken,
+      _showToast('در حال انتقال به درگاه پرداخت...');
+      final res = await ApiService.requestPayment(
+        token: _userToken!,
+        planTier: tier,
+        durationMonths: months,
+        source: 'app',
       );
 
-      final IabResult? iabResult = buyRes[MyketIAP.RESULT];
-      final Purchase? purchase = buyRes[MyketIAP.PURCHASE];
-
-      if (iabResult != null && iabResult.isSuccess() && purchase != null) {
-        final purchaseToken = purchase.mToken;
-        _showToast('تراکنش با موفقیت انجام شد، در حال ثبت اشتراک...');
-
-        // Auto-consume consumable purchase so it can be renewed/repurchased
-        try {
-          await MyketIAP.consume(purchase: purchase);
-        } catch (_) {}
-
-        final valRes = await ApiService.verifyMyketPurchase(
-          token: _userToken!,
-          sku: sku,
-          purchaseToken: purchaseToken,
-        );
-        if (valRes['success'] == true) {
-          _showToast('اشتراک شما با موفقیت فعال شد!');
-          _refreshUserProfile();
-          setState(() {
-            _currentNavIndex = 0; // Return to Home
-          });
+      if (res['success'] == true && res['payment_url'] != null) {
+        final paymentUri = Uri.parse(res['payment_url']);
+        if (await canLaunchUrl(paymentUri)) {
+          await launchUrl(paymentUri, mode: LaunchMode.externalApplication);
         } else {
-          _showToast(valRes['message'] ?? 'خطا در تایید اشتراک مایکت');
-          return;
+          _showToast('امکان باز کردن مرورگر وجود ندارد.');
         }
       } else {
-        if (iabResult != null && iabResult.mResponse == 1) { // USER_CANCELED
-          _showToast('پرداخت توسط شما لغو شد.');
-        } else if (iabResult != null && iabResult.mResponse == 7) { // ITEM_ALREADY_OWNED
-          _showToast('اشتراک قبلی شناسایی شد. در حال مصرف و بازیابی...');
-          try {
-            final invMap = await MyketIAP.queryInventory(querySkuDetails: false);
-            final Inventory? inv = invMap[MyketIAP.INVENTORY];
-            final owned = inv?.mPurchaseMap[sku];
-            if (owned != null) {
-              await MyketIAP.consume(purchase: owned);
-              _showToast('لطفاً مجدداً دکمه پرداخت را لمس فرمایید.');
-            }
-          } catch (_) {}
-        } else {
-          _showToast(iabResult?.mMessage ?? 'پرداخت انجام نشد.');
-        }
+        _showToast(res['message'] ?? 'خطا در ارتباط با درگاه پرداخت.');
       }
     } catch (e) {
-      _showToast('خطا در اجرای فرآیند خرید مایکت.');
+      _showToast('خطا در ایجاد درخواست پرداخت.');
     }
   }
 
