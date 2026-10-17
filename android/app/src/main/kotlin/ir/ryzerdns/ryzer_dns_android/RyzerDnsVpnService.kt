@@ -29,10 +29,11 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
+import javax.net.ssl.HttpsURLConnection
 import javax.net.ssl.SSLContext
+import javax.net.ssl.SNIHostName
+import javax.net.ssl.SSLPeerUnverifiedException
 import javax.net.ssl.SSLSocket
-import javax.net.ssl.TrustManager
-import javax.net.ssl.X509TrustManager
 
 class RyzerDnsVpnService : VpnService() {
 
@@ -60,7 +61,7 @@ class RyzerDnsVpnService : VpnService() {
         when (intent?.action) {
             ACTION_START -> {
                 val primaryDns = intent.getStringExtra("primary_dns") ?: "87.248.145.40"
-                val secondaryDns = intent.getStringExtra("secondary_dns") ?: "143.20.60.94"
+                val secondaryDns = intent.getStringExtra("secondary_dns") ?: "193.242.208.98"
                 val enableDoh = intent.getBooleanExtra("enable_doh", false)
                 startDns(primaryDns, secondaryDns, enableDoh)
             }
@@ -228,7 +229,9 @@ class RyzerDnsVpnService : VpnService() {
             setupUnderlyingNetworks()
 
             if (enableDoh && pfd != null) {
-                dotPool = DoTResolverPool(this, poolSize = 3)
+                dotPool = DoTResolverPool(this, poolSize = 6).apply {
+                    prewarm()
+                }
                 startDohWorker(pfd)
             }
 
@@ -359,41 +362,14 @@ class RyzerDnsVpnService : VpnService() {
     ) {
         var respBytes: ByteArray? = null
 
-        // 1. Resolve via Native Protected DoT Pool (Port 853)
+        // 1. Resolve strictly via Native Protected DoT Pool (Port 853) - 100% Encrypted & Zero UDP 53 Fallback!
         try {
             respBytes = dotPool?.resolve(dnsQuery)
         } catch (e: Exception) {
             Log.w(TAG, "DoT Pool query error: ${e.message}")
         }
 
-        // 2. Fast Fallback: Protected Direct UDP Query to 87.248.145.40:53
-        if (respBytes == null) {
-            try {
-                DatagramSocket().use { socket ->
-                    protect(socket)
-                    socket.soTimeout = 1500
-                    val sendPacket = DatagramPacket(
-                        dnsQuery,
-                        dnsQuery.size,
-                        InetAddress.getByAddress(targetServerIpBytes),
-                        53
-                    )
-                    socket.send(sendPacket)
-
-                    val recvBuf = ByteArray(4096)
-                    val recvPacket = DatagramPacket(recvBuf, recvBuf.size)
-                    socket.receive(recvPacket)
-
-                    respBytes = ByteArray(recvPacket.length).also {
-                        System.arraycopy(recvPacket.data, recvPacket.offset, it, 0, recvPacket.length)
-                    }
-                }
-            } catch (e: Exception) {
-                Log.w(TAG, "UDP fallback failed: ${e.message}")
-            }
-        }
-
-        // 3. Inject Response Packet back into TUN Interface
+        // 2. Inject Response Packet back into TUN Interface
         if (respBytes != null && respBytes.size >= 12) {
             val replyPacket = buildIpv4UdpPacket(dnsServerIp, clientIp, 53, clientPort, respBytes)
             synchronized(tunOutStream) {
@@ -409,14 +385,36 @@ class RyzerDnsVpnService : VpnService() {
             if (cacheKey != null) {
                 localDnsCache[cacheKey] = Pair(System.currentTimeMillis() + 60_000L, respBytes)
             }
+        } else {
+            Log.w(TAG, "DoT Query unresolvable: $cacheKey (Strict Port 853 Mode - Zero UDP Leak)")
         }
     }
 
-    inner class DoTResolverPool(private val vpnService: VpnService, private val poolSize: Int = 3) {
-        private val resolvers = Array(poolSize) { DoTResolver(vpnService) }
+    inner class DoTResolverPool(private val vpnService: VpnService, private val poolSize: Int = 6) {
+        private val resolvers = Array(poolSize) { idx -> DoTResolver(vpnService, idx) }
         private val counter = AtomicInteger(0)
 
+        fun prewarm() {
+            for (r in resolvers) {
+                threadPool.execute {
+                    try {
+                        r.ensureConnected()
+                    } catch (e: Exception) {
+                        Log.w(TAG, "DoT prewarm worker error: ${e.message}")
+                    }
+                }
+            }
+        }
+
         fun resolve(query: ByteArray): ByteArray? {
+            // ⚡ Non-blocking load-balanced dispatch: pick first available idle resolver
+            for (r in resolvers) {
+                if (!r.isBusy.get()) {
+                    val resp = r.resolve(query)
+                    if (resp != null) return resp
+                }
+            }
+            // If all busy, round-robin fallback
             val idx = Math.abs(counter.getAndIncrement() % poolSize)
             return resolvers[idx].resolve(query)
         }
@@ -428,18 +426,13 @@ class RyzerDnsVpnService : VpnService() {
         }
     }
 
-    inner class DoTResolver(private val vpnService: VpnService) {
-        private val serverIp = InetAddress.getByAddress(targetServerIpBytes)
+    inner class DoTResolver(private val vpnService: VpnService, private val workerIndex: Int = 0) {
         private val serverPort = 853
+        val isBusy = AtomicBoolean(false)
 
-        private val trustAll = arrayOf<TrustManager>(object : X509TrustManager {
-            override fun getAcceptedIssuers(): Array<X509Certificate> = arrayOf()
-            override fun checkClientTrusted(certs: Array<X509Certificate>, authType: String) {}
-            override fun checkServerTrusted(certs: Array<X509Certificate>, authType: String) {}
-        })
-
+        // 🔒 System-Standard SSLContext (Validates official CA - Zero TrustAll / Zero MITM vulnerability)
         private val sslContext: SSLContext = SSLContext.getInstance("TLS").apply {
-            init(null, trustAll, null)
+            init(null, null, null)
         }
 
         private var socket: SSLSocket? = null
@@ -448,44 +441,50 @@ class RyzerDnsVpnService : VpnService() {
 
         @Synchronized
         fun resolve(query: ByteArray): ByteArray? {
-            for (attempt in 0..1) {
-                try {
-                    ensureConnected()
-                    val out = outStream ?: throw IOException("No outStream")
-                    val inp = inStream ?: throw IOException("No inStream")
+            isBusy.set(true)
+            try {
+                for (attempt in 0..1) {
+                    try {
+                        ensureConnected()
+                        val out = outStream ?: throw IOException("No outStream")
+                        val inp = inStream ?: throw IOException("No inStream")
 
-                    val qLen = query.size
-                    out.write((qLen shr 8) and 0xFF)
-                    out.write(qLen and 0xFF)
-                    out.write(query)
-                    out.flush()
+                        val qLen = query.size
+                        out.write((qLen shr 8) and 0xFF)
+                        out.write(qLen and 0xFF)
+                        out.write(query)
+                        out.flush()
 
-                    val lenBuf = ByteArray(2)
-                    var r = 0
-                    while (r < 2) {
-                        val c = inp.read(lenBuf, r, 2 - r)
-                        if (c <= 0) throw IOException("EOF on len read")
-                        r += c
+                        val lenBuf = ByteArray(2)
+                        var r = 0
+                        while (r < 2) {
+                            val c = inp.read(lenBuf, r, 2 - r)
+                            if (c <= 0) throw IOException("EOF on len read")
+                            r += c
+                        }
+                        val respLen = ((lenBuf[0].toInt() and 0xFF) shl 8) or (lenBuf[1].toInt() and 0xFF)
+                        if (respLen <= 0 || respLen > 4096) throw IOException("Invalid respLen: $respLen")
+
+                        val resp = ByteArray(respLen)
+                        var total = 0
+                        while (total < respLen) {
+                            val c = inp.read(resp, total, respLen - total)
+                            if (c <= 0) throw IOException("EOF on payload read")
+                            total += c
+                        }
+                        return resp
+                    } catch (e: Exception) {
+                        Log.w(TAG, "DoTResolver #$workerIndex query error: ${e.message}")
+                        closeSocket()
                     }
-                    val respLen = ((lenBuf[0].toInt() and 0xFF) shl 8) or (lenBuf[1].toInt() and 0xFF)
-                    if (respLen <= 0 || respLen > 4096) throw IOException("Invalid respLen: $respLen")
-
-                    val resp = ByteArray(respLen)
-                    var total = 0
-                    while (total < respLen) {
-                        val c = inp.read(resp, total, respLen - total)
-                        if (c <= 0) throw IOException("EOF on payload read")
-                        total += c
-                    }
-                    return resp
-                } catch (e: Exception) {
-                    closeSocket()
                 }
+                return null
+            } finally {
+                isBusy.set(false)
             }
-            return null
         }
 
-        private fun ensureConnected() {
+        fun ensureConnected() {
             if (socket != null && socket?.isConnected == true && socket?.isClosed == false) {
                 return
             }
@@ -494,12 +493,43 @@ class RyzerDnsVpnService : VpnService() {
             val plain = Socket()
             vpnService.protect(plain)
             plain.tcpNoDelay = true
-            plain.soTimeout = 2500
-            plain.connect(InetSocketAddress(serverIp, serverPort), 2000)
+            plain.keepAlive = true
+            plain.soTimeout = 4000
+
+            // 🌐 Dynamic resolution of dns.ryzerdns.ir with dual-node fallback
+            val resolvedAddresses = try {
+                InetAddress.getAllByName(targetServerHost)
+            } catch (_: Exception) {
+                arrayOf(
+                    InetAddress.getByAddress(targetServerIpBytes),
+                    InetAddress.getByName("193.242.208.98")
+                )
+            }
+            val chosenIp = resolvedAddresses[workerIndex % resolvedAddresses.size]
+            plain.connect(InetSocketAddress(chosenIp, serverPort), 3000)
 
             val ssl = sslContext.socketFactory.createSocket(plain, targetServerHost, serverPort, true) as SSLSocket
-            ssl.soTimeout = 2500
+            ssl.tcpNoDelay = true
+            ssl.keepAlive = true
+            ssl.soTimeout = 4000
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                try {
+                    val sslParams = ssl.sslParameters
+                    sslParams.serverNames = listOf(SNIHostName(targetServerHost))
+                    ssl.sslParameters = sslParams
+                } catch (_: Exception) {}
+            }
+
             ssl.startHandshake()
+
+            // 🔒 Official RFC 7858 Standard Hostname Verification for dns.ryzerdns.ir
+            val session = ssl.session
+            if (!HttpsURLConnection.getDefaultHostnameVerifier().verify(targetServerHost, session)) {
+                ssl.close()
+                plain.close()
+                throw SSLPeerUnverifiedException("Hostname verification failed for $targetServerHost")
+            }
 
             socket = ssl
             inStream = ssl.inputStream
@@ -513,6 +543,7 @@ class RyzerDnsVpnService : VpnService() {
             socket = null
             inStream = null
             outStream = null
+            isBusy.set(false)
         }
     }
 

@@ -16,7 +16,7 @@ class MainActivity: FlutterActivity() {
 
     private var pendingResult: MethodChannel.Result? = null
     private var targetPrimaryDns = "87.248.145.40"
-    private var targetSecondaryDns = "143.20.60.94"
+    private var targetSecondaryDns = "193.242.208.98"
     private var targetEnableDoh = false
     private var targetDohUrl = "https://ryzerdns.ir/dns-query"
 

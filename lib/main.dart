@@ -254,6 +254,15 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
       if (mounted) {
         setState(() => _userData = res['data']);
       }
+    } else if (res['statusCode'] == 401 || (res['message'] != null && res['message'].toString().contains('نشست'))) {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove('ryzer_user_token');
+      if (mounted) {
+        setState(() {
+          _userToken = null;
+          _userData = null;
+        });
+      }
     }
   }
 
@@ -299,7 +308,7 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
 
       final success = await VpnManager.startVpn(
         primaryDns: '87.248.145.40',
-        secondaryDns: '143.20.60.94',
+        secondaryDns: '193.242.208.98',
         enableDoh: _enableUltraConnection,
         dohUrl: 'https://ryzerdns.ir/dns-query',
       );
@@ -311,7 +320,7 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
 
       if (success) {
         if (_enableUltraConnection) {
-          _showToast('سرویس اتصال فوق‌العاده RyzerDNS (DoH) فعال شد.');
+          _showToast('سرویس اتصال فوق‌العاده RyzerDNS (DoT 853) فعال شد.');
         } else {
           _showToast('سرویس هوشمند RyzerDNS متصل شد.');
         }
@@ -533,7 +542,34 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
           ],
           _buildSubscriptionCard(),
           _buildUltraConnectionToggle(),
-          const SizedBox(height: 28),
+          const SizedBox(height: 20),
+          if (_isConnected && _enableUltraConnection)
+            Container(
+              margin: const EdgeInsets.only(bottom: 12),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+              decoration: BoxDecoration(
+                color: const Color(0x2600E5FF),
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(color: const Color(0x6600E5FF)),
+              ),
+              child: const Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.lock_outline_rounded, size: 14, color: Color(0xFF00E5FF)),
+                  SizedBox(width: 6),
+                  Text(
+                    'Connected via dns.ryzerdns.ir (Port 853)',
+                    style: TextStyle(
+                      fontFamily: 'Syne',
+                      fontSize: 11.5,
+                      fontWeight: FontWeight.w700,
+                      color: Color(0xFF00E5FF),
+                      letterSpacing: 0.2,
+                    ),
+                  ),
+                ],
+              ),
+            ),
           _buildPowerButton(),
           const SizedBox(height: 28),
           _buildPingAndStatusRow(),
@@ -586,15 +622,15 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                       decoration: BoxDecoration(
-                        color: _enableUltraConnection ? const Color(0x3300E676) : const Color(0x33FFB800),
+                        color: _enableUltraConnection ? const Color(0x3300E5FF) : const Color(0x33FFB800),
                         borderRadius: BorderRadius.circular(6),
                       ),
                       child: Text(
-                        _enableUltraConnection ? 'فعال (DoH)' : 'آزمایشی',
+                        _enableUltraConnection ? 'فعال (DoT 853)' : 'آزمایشی',
                         style: TextStyle(
                           fontSize: 10,
                           fontWeight: FontWeight.w700,
-                          color: _enableUltraConnection ? const Color(0xFF00E676) : const Color(0xFFFFB800),
+                          color: _enableUltraConnection ? const Color(0xFF00E5FF) : const Color(0xFFFFB800),
                         ),
                       ),
                     ),
@@ -602,7 +638,7 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
                 ),
                 const SizedBox(height: 2),
                 const Text(
-                  'استفاده از پروتکل رمزنگاری‌شده DoH برای دور زدن فیلترینگ و اختلالات شدید',
+                  'اتصال رمزنگاری‌شده مستقیم از طریق سرور اختصاصی dns.ryzerdns.ir',
                   style: TextStyle(fontSize: 11, color: Colors.white60, height: 1.3),
                 ),
               ],
@@ -736,19 +772,30 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
         animation: _pulseController,
         builder: (ctx, child) {
           final glow = _isConnected ? (_pulseController.value * 15 + 15) : 0.0;
+          final isUltra = _isConnected && _enableUltraConnection;
+          final primaryColor = _isConnected
+              ? (isUltra ? const Color(0xFF00E5FF) : const Color(0xFF00E676))
+              : const Color(0xFFFF3B5C);
+          final bgColor = _isConnected
+              ? (isUltra ? const Color(0xFF02171F) : const Color(0xFF0A1410))
+              : const Color(0xFF140A0D);
+          final shadowColor = _isConnected
+              ? (isUltra ? const Color(0x6600E5FF) : const Color(0x6600E676))
+              : const Color(0x33FF3B5C);
+
           return Container(
             width: 170,
             height: 170,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
-              color: _isConnected ? const Color(0xFF0A1410) : const Color(0xFF140A0D),
+              color: bgColor,
               border: Border.all(
-                color: _isConnected ? const Color(0xFF00E676) : const Color(0xFFFF3B5C),
+                color: primaryColor,
                 width: 3.5,
               ),
               boxShadow: [
                 BoxShadow(
-                  color: _isConnected ? const Color(0x6600E676) : const Color(0x33FF3B5C),
+                  color: shadowColor,
                   blurRadius: glow + 10,
                   spreadRadius: glow / 3,
                 ),
@@ -763,7 +810,7 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
                         Icon(
                           Icons.power_settings_new_rounded,
                           size: 58,
-                          color: _isConnected ? const Color(0xFF00E676) : const Color(0xFFFF3B5C),
+                          color: primaryColor,
                         ),
                         const SizedBox(height: 6),
                         Text(
@@ -773,7 +820,7 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
                           style: TextStyle(
                             fontSize: 14,
                             fontWeight: FontWeight.w900,
-                            color: _isConnected ? const Color(0xFF00E676) : Colors.white,
+                            color: _isConnected ? primaryColor : Colors.white,
                           ),
                         ),
                       ],

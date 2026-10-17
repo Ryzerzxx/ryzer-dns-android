@@ -175,9 +175,13 @@ class ApiService {
           }
         };
       }
-      return {'success': false, 'message': data['message'] ?? data['detail'] ?? 'خطا در بازیابی پروفایل.'};
+      return {
+        'success': false,
+        'statusCode': response.statusCode,
+        'message': data['message'] ?? data['detail'] ?? 'خطا در بازیابی پروفایل.'
+      };
     } catch (e) {
-      return {'success': false, 'message': 'عدم دسترسی به اینترنت.'};
+      return {'success': false, 'statusCode': 0, 'message': 'عدم دسترسی به اینترنت.'};
     }
   }
 
@@ -346,7 +350,7 @@ class ApiService {
     } catch (_) {}
     return {
       'primary_dns': '87.248.145.40',
-      'secondary_dns': '46.8.102.223',
+      'secondary_dns': '193.242.208.98',
       'update_available': false,
     };
   }
