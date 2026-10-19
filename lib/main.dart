@@ -71,7 +71,6 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
   bool _isDetectingIp = false;
   late AnimationController _pulseController;
   int _currentNavIndex = 0; // 0: Home, 1: Plans, 2: Support, 3: Settings
-  bool _enableUltraConnection = false;
 
   // 🌐 Server-Driven UI & Remote Config State
   Map<String, dynamic> _remoteConfig = {};
@@ -237,10 +236,6 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
     try {
       final prefs = await SharedPreferences.getInstance();
       final token = prefs.getString('ryzer_user_token');
-      final ultra = prefs.getBool('enable_ultra_connection') ?? false;
-      setState(() {
-        _enableUltraConnection = ultra;
-      });
       if (token != null && token.isNotEmpty) {
         setState(() => _userToken = token);
         await _refreshUserProfile();
@@ -437,7 +432,7 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
       final success = await VpnManager.startVpn(
         primaryDns: '87.248.145.40',
         secondaryDns: '193.242.208.98',
-        enableDoh: _enableUltraConnection,
+        enableDoh: false,
         dohUrl: 'https://ryzerdns.ir/dns-query',
       );
 
@@ -447,11 +442,7 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
       });
 
       if (success) {
-        if (_enableUltraConnection) {
-          _showToast('سرویس اتصال فوق‌العاده RyzerDNS (DoT 853) فعال شد.');
-        } else {
-          _showToast('سرویس هوشمند RyzerDNS متصل شد.');
-        }
+        _showToast('سرویس هوشمند RyzerDNS متصل شد.');
         _refreshPing();
       } else {
         _showToast('اجازه اتصال VPN در سیستم تایید نشد.');
@@ -670,121 +661,12 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
           ],
           _buildSubscriptionCard(),
           _buildIpManagementCard(),
-          _buildUltraConnectionToggle(),
-          const SizedBox(height: 20),
-          if (_isConnected && _enableUltraConnection)
-            Container(
-              margin: const EdgeInsets.only(bottom: 12),
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-              decoration: BoxDecoration(
-                color: const Color(0x2600E5FF),
-                borderRadius: BorderRadius.circular(20),
-                border: Border.all(color: const Color(0x6600E5FF)),
-              ),
-              child: const Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(Icons.lock_outline_rounded, size: 14, color: Color(0xFF00E5FF)),
-                  SizedBox(width: 6),
-                  Text(
-                    'Connected via dns.ryzerdns.ir (Port 853)',
-                    style: TextStyle(
-                      fontFamily: 'Syne',
-                      fontSize: 11.5,
-                      fontWeight: FontWeight.w700,
-                      color: Color(0xFF00E5FF),
-                      letterSpacing: 0.2,
-                    ),
-                  ),
-                ],
-              ),
-            ),
+          const SizedBox(height: 28),
           _buildPowerButton(),
           const SizedBox(height: 28),
           _buildPingAndStatusRow(),
           const SizedBox(height: 24),
           _buildQuickActionsRow(),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildUltraConnectionToggle() {
-    return Container(
-      width: double.infinity,
-      margin: const EdgeInsets.only(top: 14),
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-      decoration: BoxDecoration(
-        color: const Color(0xFF14141E),
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(
-          color: _enableUltraConnection ? const Color(0xFFFF3B5C).withOpacity(0.6) : const Color(0x1AFFFFFF),
-          width: 1.2,
-        ),
-      ),
-      child: Row(
-        children: [
-          Container(
-            padding: const EdgeInsets.all(8),
-            decoration: BoxDecoration(
-              color: _enableUltraConnection ? const Color(0x26FF3B5C) : const Color(0x0DFFFFFF),
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: Icon(
-              Icons.bolt_rounded,
-              color: _enableUltraConnection ? const Color(0xFFFF3B5C) : Colors.white54,
-              size: 24,
-            ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    const Text(
-                      'اتصال فوق‌العاده',
-                      style: TextStyle(fontSize: 14, fontWeight: FontWeight.w800, color: Colors.white),
-                    ),
-                    const SizedBox(width: 8),
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                      decoration: BoxDecoration(
-                        color: _enableUltraConnection ? const Color(0x3300E5FF) : const Color(0x33FFB800),
-                        borderRadius: BorderRadius.circular(6),
-                      ),
-                      child: Text(
-                        _enableUltraConnection ? 'فعال (DoT 853)' : 'آزمایشی',
-                        style: TextStyle(
-                          fontSize: 10,
-                          fontWeight: FontWeight.w700,
-                          color: _enableUltraConnection ? const Color(0xFF00E5FF) : const Color(0xFFFFB800),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 2),
-                const Text(
-                  'اتصال رمزنگاری‌شده مستقیم از طریق سرور اختصاصی dns.ryzerdns.ir',
-                  style: TextStyle(fontSize: 11, color: Colors.white60, height: 1.3),
-                ),
-              ],
-            ),
-          ),
-          Switch(
-            value: _enableUltraConnection,
-            activeColor: const Color(0xFFFF3B5C),
-            onChanged: (val) async {
-              setState(() => _enableUltraConnection = val);
-              final prefs = await SharedPreferences.getInstance();
-              await prefs.setBool('enable_ultra_connection', val);
-              if (_isConnected) {
-                _showToast('برای اعمال حالت جدید، یک‌بار قطع و دوباره متصل شوید.');
-              }
-            },
-          ),
         ],
       ),
     );
@@ -1150,15 +1032,14 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
         animation: _pulseController,
         builder: (ctx, child) {
           final glow = _isConnected ? (_pulseController.value * 15 + 15) : 0.0;
-          final isUltra = _isConnected && _enableUltraConnection;
           final primaryColor = _isConnected
-              ? (isUltra ? const Color(0xFF00E5FF) : const Color(0xFF00E676))
+              ? const Color(0xFF00E676)
               : const Color(0xFFFF3B5C);
           final bgColor = _isConnected
-              ? (isUltra ? const Color(0xFF02171F) : const Color(0xFF0A1410))
+              ? const Color(0xFF0A1410)
               : const Color(0xFF140A0D);
           final shadowColor = _isConnected
-              ? (isUltra ? const Color(0x6600E5FF) : const Color(0x6600E676))
+              ? const Color(0x6600E676)
               : const Color(0x33FF3B5C);
 
           return Container(
