@@ -234,21 +234,25 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
   }
 
   Future<void> _loadStoredSession() async {
-    final prefs = await SharedPreferences.getInstance();
-    final token = prefs.getString('ryzer_user_token');
-    final ultra = prefs.getBool('enable_ultra_connection') ?? false;
-    setState(() {
-      _enableUltraConnection = ultra;
-    });
-    if (token != null && token.isNotEmpty) {
-      setState(() => _userToken = token);
-      await _refreshUserProfile();
-      _lastRegisteredIp = _userData?['registered_ip'];
-      // Check & auto-register device IP silently on startup!
-      _checkAndAutoRegisterIp(silent: true);
-      _startPeriodicIpCheck();
-      _loadTickets();
-    } else {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final token = prefs.getString('ryzer_user_token');
+      final ultra = prefs.getBool('enable_ultra_connection') ?? false;
+      setState(() {
+        _enableUltraConnection = ultra;
+      });
+      if (token != null && token.isNotEmpty) {
+        setState(() => _userToken = token);
+        await _refreshUserProfile();
+        _lastRegisteredIp = _userData?['registered_ip'];
+        // Check & auto-register device IP silently on startup!
+        _checkAndAutoRegisterIp(silent: true);
+        _startPeriodicIpCheck();
+        _loadTickets();
+      } else {
+        _detectCurrentIpOnly();
+      }
+    } catch (_) {
       _detectCurrentIpOnly();
     }
     _refreshPing();
@@ -892,25 +896,78 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
 
   Widget _buildIpManagementCard() {
     final registeredIp = _lastRegisteredIp ?? _userData?['registered_ip'] ?? '';
-    final detectedIp = (_currentDetectedIp != null && _currentDetectedIp!.isNotEmpty)
-        ? _currentDetectedIp!
-        : (registeredIp.isNotEmpty ? registeredIp : (_isDetectingIp ? 'در حال شناسایی...' : 'نامشخص'));
+    final hasDetected = _currentDetectedIp != null && _currentDetectedIp!.isNotEmpty;
     final isSynced = _userToken != null &&
         registeredIp.isNotEmpty &&
-        _currentDetectedIp != null &&
+        hasDetected &&
         registeredIp == _currentDetectedIp;
+
+    // Display IP text
+    final String displayIpText;
+    if (hasDetected) {
+      displayIpText = _currentDetectedIp!;
+    } else if (registeredIp.isNotEmpty) {
+      displayIpText = registeredIp;
+    } else if (_isDetectingIp) {
+      displayIpText = 'در حال دریافت...';
+    } else {
+      displayIpText = 'شناسایی‌نشده';
+    }
+
+    // Status Badge determination
+    final String badgeText;
+    final Color badgeColor;
+    final Color badgeBg;
+    final Color badgeBorder;
+
+    if (_isDetectingIp) {
+      badgeText = 'در حال بررسی';
+      badgeColor = const Color(0xFF00E5FF);
+      badgeBg = const Color(0x1A00E5FF);
+      badgeBorder = const Color(0x6600E5FF);
+    } else if (isSynced) {
+      badgeText = 'همگام و ثبت‌شده';
+      badgeColor = const Color(0xFF00E676);
+      badgeBg = const Color(0x1A00E676);
+      badgeBorder = const Color(0x6600E676);
+    } else if (_userToken != null) {
+      if (hasDetected) {
+        badgeText = 'نیاز به ثبت';
+        badgeColor = const Color(0xFFFFB800);
+        badgeBg = const Color(0x1AFFB800);
+        badgeBorder = const Color(0x66FFB800);
+      } else {
+        badgeText = 'آفلاین / نامشخص';
+        badgeColor = Colors.white54;
+        badgeBg = const Color(0x0DFFFFFF);
+        badgeBorder = const Color(0x1AFFFFFF);
+      }
+    } else {
+      // User is NOT logged in
+      if (hasDetected) {
+        badgeText = 'نیاز به ورود';
+        badgeColor = const Color(0xFFFFB800);
+        badgeBg = const Color(0x1AFFB800);
+        badgeBorder = const Color(0x66FFB800);
+      } else {
+        badgeText = 'نامشخص';
+        badgeColor = Colors.white38;
+        badgeBg = const Color(0x0DFFFFFF);
+        badgeBorder = const Color(0x1AFFFFFF);
+      }
+    }
 
     return Container(
       width: double.infinity,
       margin: const EdgeInsets.only(top: 14),
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
       decoration: BoxDecoration(
-        color: const Color(0xFF0E0E14),
+        color: const Color(0xFF14141E),
         borderRadius: BorderRadius.circular(14),
         border: Border.all(
           color: isSynced
-              ? const Color(0x3300E676)
-              : (_userToken != null ? const Color(0x3300E5FF) : const Color(0x1AFFFFFF)),
+              ? const Color(0x4D00E676)
+              : const Color(0x1FFFFFFF),
           width: 1.2,
         ),
       ),
@@ -927,14 +984,14 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
                     decoration: BoxDecoration(
                       color: isSynced
                           ? const Color(0x1A00E676)
-                          : (_userToken != null ? const Color(0x1A00E5FF) : const Color(0x0DFFFFFF)),
+                          : const Color(0x1AFF3B5C),
                       borderRadius: BorderRadius.circular(8),
                     ),
                     child: Icon(
                       Icons.router_rounded,
                       color: isSynced
                           ? const Color(0xFF00E676)
-                          : (_userToken != null ? const Color(0xFF00E5FF) : Colors.white70),
+                          : const Color(0xFFFF3B5C),
                       size: 18,
                     ),
                   ),
@@ -952,15 +1009,9 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3.5),
                 decoration: BoxDecoration(
-                  color: isSynced
-                      ? const Color(0x1A00E676)
-                      : (_userToken != null ? const Color(0x1AFFB800) : const Color(0x0DFFFFFF)),
+                  color: badgeBg,
                   borderRadius: BorderRadius.circular(6),
-                  border: Border.all(
-                    color: isSynced
-                        ? const Color(0x6600E676)
-                        : (_userToken != null ? const Color(0x66FFB800) : const Color(0x1AFFFFFF)),
-                  ),
+                  border: Border.all(color: badgeBorder),
                 ),
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
@@ -970,22 +1021,16 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
                       height: 6,
                       decoration: BoxDecoration(
                         shape: BoxShape.circle,
-                        color: isSynced
-                            ? const Color(0xFF00E676)
-                            : (_userToken != null ? const Color(0xFFFFB800) : Colors.white38),
+                        color: badgeColor,
                       ),
                     ),
                     const SizedBox(width: 5),
                     Text(
-                      isSynced
-                          ? 'ثبت‌شده و همگام'
-                          : (_userToken != null ? 'بررسی خودکار (هر ۱ دقیقه)' : 'شناسایی‌شده'),
+                      badgeText,
                       style: TextStyle(
                         fontSize: 10.5,
                         fontWeight: FontWeight.w700,
-                        color: isSynced
-                            ? const Color(0xFF00E676)
-                            : (_userToken != null ? const Color(0xFFFFB800) : Colors.white70),
+                        color: badgeColor,
                       ),
                     ),
                   ],
@@ -998,24 +1043,29 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
             children: [
               Expanded(
                 child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+                  height: 42,
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
                   decoration: BoxDecoration(
-                    color: const Color(0xFF14141E),
+                    color: const Color(0xFF0A0A10),
                     borderRadius: BorderRadius.circular(10),
                     border: Border.all(color: const Color(0x1AFFFFFF)),
                   ),
                   child: Row(
                     children: [
-                      const Icon(Icons.wifi_rounded, size: 16, color: Color(0xFFA0A0B0)),
+                      Icon(
+                        hasDetected ? Icons.wifi_rounded : Icons.wifi_off_rounded,
+                        size: 16,
+                        color: hasDetected ? const Color(0xFF00E5FF) : Colors.white38,
+                      ),
                       const SizedBox(width: 8),
                       Expanded(
                         child: Text(
-                          detectedIp,
-                          style: const TextStyle(
+                          displayIpText,
+                          style: TextStyle(
                             fontFamily: 'Syne',
                             fontSize: 14,
                             fontWeight: FontWeight.w700,
-                            color: Colors.white,
+                            color: hasDetected ? Colors.white : Colors.white54,
                             letterSpacing: 0.5,
                           ),
                           overflow: TextOverflow.ellipsis,
@@ -1036,9 +1086,9 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
               ),
               const SizedBox(width: 8),
               SizedBox(
-                height: 40,
+                height: 42,
                 child: ElevatedButton.icon(
-                  onPressed: _isRegisteringIp
+                  onPressed: (_isRegisteringIp || _isDetectingIp)
                       ? null
                       : () {
                           if (_userToken == null) {
@@ -1051,28 +1101,42 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
                       ? const SizedBox(
                           width: 14,
                           height: 14,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
-                          ),
+                          child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
                         )
-                      : const Icon(Icons.sync_rounded, size: 16),
+                      : Icon(
+                          _userToken == null
+                              ? Icons.login_rounded
+                              : (isSynced ? Icons.refresh_rounded : Icons.check_circle_outline_rounded),
+                          size: 16,
+                        ),
                   label: Text(
-                    _isRegisteringIp
-                        ? 'در حال ثبت...'
-                        : (_userToken == null ? 'ورود و ثبت' : 'ثبت آی‌پی'),
-                    style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700),
+                    _userToken == null
+                        ? 'ورود و ثبت'
+                        : (_isRegisteringIp ? 'در حال ثبت...' : (isSynced ? 'ثبت مجدد' : 'ثبت آی‌پی')),
+                    style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
                   ),
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFFFF3B5C),
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                    backgroundColor: _userToken == null
+                        ? const Color(0xFF232336)
+                        : (isSynced ? const Color(0x1A00E676) : const Color(0xFFFF3B5C)),
+                    foregroundColor: _userToken == null
+                        ? Colors.white
+                        : (isSynced ? const Color(0xFF00E676) : Colors.white),
+                    side: isSynced ? const BorderSide(color: Color(0xFF00E676)) : BorderSide.none,
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    padding: const EdgeInsets.symmetric(horizontal: 14),
                     elevation: 0,
                   ),
                 ),
               ),
             ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            _userToken != null
+                ? '• بررسی خودکار آی‌پی هر ۱ دقیقه فعال است (تغییر شبکه خودکار ثبت می‌شود).'
+                : '• برای استفاده از سرویس و اتصال بدون تحریم، وارد حساب خود شوید.',
+            style: const TextStyle(fontSize: 10.5, color: Colors.white54, height: 1.3),
           ),
         ],
       ),
@@ -2781,10 +2845,10 @@ class _AuthModalSheetState extends State<AuthModalSheet> {
               }
             }
             setState(() => _isLoading = false);
-          } catch (e) {
+          } catch (_) {
             setState(() {
               _isLoading = false;
-              _errorMsg = 'خطا در اتصال به گوگل‌پلی: $e';
+              _errorMsg = 'خطا در برقراری ارتباط با سرویس گوگل. لطفاً اتصال اینترنت خود را بررسی نمایید.';
             });
           }
         },
@@ -2821,15 +2885,24 @@ class _AuthModalSheetState extends State<AuthModalSheet> {
       _errorMsg = null;
     });
 
-    final res = await ApiService.login(u, p);
-    setState(() => _isLoading = false);
+    try {
+      final res = await ApiService.login(u, p);
+      setState(() => _isLoading = false);
 
-    if (res['success'] == true && res['token'] != null) {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setString('ryzer_user_token', res['token']);
-      if (mounted) Navigator.pop(context);
-    } else {
-      setState(() => _errorMsg = res['message'] ?? 'نام کاربری یا رمز عبور اشتباه است.');
+      if (res['success'] == true && res['token'] != null) {
+        try {
+          final prefs = await SharedPreferences.getInstance();
+          await prefs.setString('ryzer_user_token', res['token']);
+        } catch (_) {}
+        if (mounted) Navigator.pop(context);
+      } else {
+        setState(() => _errorMsg = res['message'] ?? 'نام کاربری یا رمز عبور اشتباه است.');
+      }
+    } catch (_) {
+      setState(() {
+        _isLoading = false;
+        _errorMsg = 'خطا در برقراری ارتباط با سرور. لطفاً مجدداً تلاش نمایید.';
+      });
     }
   }
 
