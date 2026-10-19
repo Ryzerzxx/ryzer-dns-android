@@ -64,6 +64,11 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
   Map<String, dynamic>? _userData;
   Timer? _statusTimer;
   Timer? _pingTimer;
+  Timer? _ipCheckTimer;
+  String? _currentDetectedIp;
+  String? _lastRegisteredIp;
+  bool _isRegisteringIp = false;
+  bool _isDetectingIp = false;
   late AnimationController _pulseController;
   int _currentNavIndex = 0; // 0: Home, 1: Plans, 2: Support, 3: Settings
   bool _enableUltraConnection = false;
@@ -223,6 +228,7 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
   void dispose() {
     _statusTimer?.cancel();
     _pingTimer?.cancel();
+    _ipCheckTimer?.cancel();
     _pulseController.dispose();
     super.dispose();
   }
@@ -237,14 +243,124 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
     if (token != null && token.isNotEmpty) {
       setState(() => _userToken = token);
       await _refreshUserProfile();
-      // Auto-register device IP silently on startup!
-      ApiService.registerIp(token);
+      _lastRegisteredIp = _userData?['registered_ip'];
+      // Check & auto-register device IP silently on startup!
+      _checkAndAutoRegisterIp(silent: true);
+      _startPeriodicIpCheck();
       _loadTickets();
+    } else {
+      _detectCurrentIpOnly();
     }
     _refreshPing();
     _pingTimer = Timer.periodic(const Duration(seconds: 15), (_) {
       if (_isConnected) _refreshPing();
     });
+  }
+
+  void _startPeriodicIpCheck() {
+    _ipCheckTimer?.cancel();
+    _ipCheckTimer = Timer.periodic(const Duration(minutes: 1), (_) {
+      if (_userToken != null && _userToken!.isNotEmpty) {
+        _checkAndAutoRegisterIp(silent: true);
+      }
+    });
+  }
+
+  Future<void> _detectCurrentIpOnly() async {
+    if (_isDetectingIp) return;
+    setState(() => _isDetectingIp = true);
+    try {
+      final detectedIp = await ApiService.detectIp();
+      if (mounted && detectedIp != null && detectedIp.isNotEmpty) {
+        setState(() {
+          _currentDetectedIp = detectedIp;
+          _isDetectingIp = false;
+        });
+      } else if (mounted) {
+        setState(() => _isDetectingIp = false);
+      }
+    } catch (_) {
+      if (mounted) setState(() => _isDetectingIp = false);
+    }
+  }
+
+  Future<void> _checkAndAutoRegisterIp({bool silent = false, bool manualForce = false}) async {
+    if (_userToken == null || _isRegisteringIp) return;
+    if (!silent) {
+      setState(() {
+        _isDetectingIp = true;
+        _isRegisteringIp = true;
+      });
+    }
+
+    try {
+      final detectedIp = await ApiService.detectIp();
+      if (mounted) {
+        if (detectedIp != null && detectedIp.isNotEmpty) {
+          setState(() {
+            _currentDetectedIp = detectedIp;
+            _isDetectingIp = false;
+          });
+        } else {
+          setState(() => _isDetectingIp = false);
+        }
+      }
+
+      final ipToRegister = _currentDetectedIp;
+      final currentSaved = _lastRegisteredIp ?? _userData?['registered_ip'] ?? '';
+
+      final hasChanged = ipToRegister != null && ipToRegister.isNotEmpty && ipToRegister != currentSaved;
+      final needsRegistration = manualForce || currentSaved.isEmpty || hasChanged;
+
+      if (needsRegistration) {
+        if (silent) {
+          setState(() => _isRegisteringIp = true);
+        }
+        final res = await ApiService.registerIp(_userToken!, manualIp: ipToRegister);
+        if (mounted) {
+          setState(() {
+            _isRegisteringIp = false;
+            if (res['success'] == true) {
+              final newIp = (res['registered_ip'] != null && res['registered_ip'].toString().isNotEmpty)
+                  ? res['registered_ip'].toString()
+                  : (ipToRegister ?? '');
+              _lastRegisteredIp = newIp;
+              if (_currentDetectedIp == null || _currentDetectedIp!.isEmpty) {
+                _currentDetectedIp = newIp;
+              }
+              if (_userData != null) {
+                _userData!['registered_ip'] = newIp;
+              }
+            }
+          });
+
+          if (!silent) {
+            if (res['success'] == true) {
+              _showToast('آدرس آی‌پی دستگاه (${_lastRegisteredIp}) با موفقیت ثبت شد.');
+            } else {
+              _showToast(res['message'] ?? 'خطا در ثبت آی‌پی.');
+            }
+          } else if (res['success'] == true && hasChanged) {
+            _showToast('تغییر آی‌پی اینترنت شناسایی و خودکار ثبت شد: ${_lastRegisteredIp}');
+          }
+        }
+      } else {
+        if (mounted && !silent) {
+          setState(() => _isRegisteringIp = false);
+          _showToast('آی‌پی فعلی شما (${currentSaved}) همگام است و نیازی به تغییر ندارد.');
+        }
+      }
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          _isDetectingIp = false;
+          _isRegisteringIp = false;
+        });
+        if (!silent) {
+          _showToast('خطا در بررسی یا ثبت آی‌پی.');
+        }
+      }
+    }
   }
 
   Future<void> _refreshUserProfile() async {
@@ -298,11 +414,19 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
       setState(() => _isConnecting = true);
       // If user is logged in, register IP with user token
       if (_userToken != null && _userToken!.isNotEmpty) {
-        final regSuccess = await ApiService.registerIp(_userToken!);
-        if (!regSuccess) {
+        final regRes = await ApiService.registerIp(_userToken!, manualIp: _currentDetectedIp);
+        if (regRes['success'] != true) {
           setState(() => _isConnecting = false);
-          _showToast('ثبت آی‌پی با خطا مواجه شد. اشتراک خود را بررسی نمایید.');
+          _showToast(regRes['message'] ?? 'ثبت آی‌پی با خطا مواجه شد. اشتراک خود را بررسی نمایید.');
           return;
+        }
+        if (mounted) {
+          setState(() {
+            _lastRegisteredIp = regRes['registered_ip'];
+            if (_userData != null) {
+              _userData!['registered_ip'] = _lastRegisteredIp;
+            }
+          });
         }
       }
 
@@ -541,6 +665,7 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
             ),
           ],
           _buildSubscriptionCard(),
+          _buildIpManagementCard(),
           _buildUltraConnectionToggle(),
           const SizedBox(height: 20),
           if (_isConnected && _enableUltraConnection)
@@ -759,6 +884,195 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
               elevation: 0,
             ),
             child: const Text('تمدید / ارتقا', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildIpManagementCard() {
+    final registeredIp = _lastRegisteredIp ?? _userData?['registered_ip'] ?? '';
+    final detectedIp = (_currentDetectedIp != null && _currentDetectedIp!.isNotEmpty)
+        ? _currentDetectedIp!
+        : (registeredIp.isNotEmpty ? registeredIp : (_isDetectingIp ? 'در حال شناسایی...' : 'نامشخص'));
+    final isSynced = _userToken != null &&
+        registeredIp.isNotEmpty &&
+        _currentDetectedIp != null &&
+        registeredIp == _currentDetectedIp;
+
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.only(top: 14),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: const Color(0xFF0E0E14),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: isSynced
+              ? const Color(0x3300E676)
+              : (_userToken != null ? const Color(0x3300E5FF) : const Color(0x1AFFFFFF)),
+          width: 1.2,
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(7),
+                    decoration: BoxDecoration(
+                      color: isSynced
+                          ? const Color(0x1A00E676)
+                          : (_userToken != null ? const Color(0x1A00E5FF) : const Color(0x0DFFFFFF)),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Icon(
+                      Icons.router_rounded,
+                      color: isSynced
+                          ? const Color(0xFF00E676)
+                          : (_userToken != null ? const Color(0xFF00E5FF) : Colors.white70),
+                      size: 18,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  const Text(
+                    'آدرس آی‌پی دستگاه',
+                    style: TextStyle(
+                      fontSize: 13.5,
+                      fontWeight: FontWeight.w800,
+                      color: Colors.white,
+                    ),
+                  ),
+                ],
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3.5),
+                decoration: BoxDecoration(
+                  color: isSynced
+                      ? const Color(0x1A00E676)
+                      : (_userToken != null ? const Color(0x1AFFB800) : const Color(0x0DFFFFFF)),
+                  borderRadius: BorderRadius.circular(6),
+                  border: Border.all(
+                    color: isSynced
+                        ? const Color(0x6600E676)
+                        : (_userToken != null ? const Color(0x66FFB800) : const Color(0x1AFFFFFF)),
+                  ),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Container(
+                      width: 6,
+                      height: 6,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: isSynced
+                            ? const Color(0xFF00E676)
+                            : (_userToken != null ? const Color(0xFFFFB800) : Colors.white38),
+                      ),
+                    ),
+                    const SizedBox(width: 5),
+                    Text(
+                      isSynced
+                          ? 'ثبت‌شده و همگام'
+                          : (_userToken != null ? 'بررسی خودکار (هر ۱ دقیقه)' : 'شناسایی‌شده'),
+                      style: TextStyle(
+                        fontSize: 10.5,
+                        fontWeight: FontWeight.w700,
+                        color: isSynced
+                            ? const Color(0xFF00E676)
+                            : (_userToken != null ? const Color(0xFFFFB800) : Colors.white70),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF14141E),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: const Color(0x1AFFFFFF)),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.wifi_rounded, size: 16, color: Color(0xFFA0A0B0)),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          detectedIp,
+                          style: const TextStyle(
+                            fontFamily: 'Syne',
+                            fontSize: 14,
+                            fontWeight: FontWeight.w700,
+                            color: Colors.white,
+                            letterSpacing: 0.5,
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      if (_isDetectingIp)
+                        const SizedBox(
+                          width: 14,
+                          height: 14,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            valueColor: AlwaysStoppedAnimation<Color>(Color(0xFF00E5FF)),
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              SizedBox(
+                height: 40,
+                child: ElevatedButton.icon(
+                  onPressed: _isRegisteringIp
+                      ? null
+                      : () {
+                          if (_userToken == null) {
+                            _showAuthModal();
+                          } else {
+                            _checkAndAutoRegisterIp(manualForce: true);
+                          }
+                        },
+                  icon: _isRegisteringIp
+                      ? const SizedBox(
+                          width: 14,
+                          height: 14,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                          ),
+                        )
+                      : const Icon(Icons.sync_rounded, size: 16),
+                  label: Text(
+                    _isRegisteringIp
+                        ? 'در حال ثبت...'
+                        : (_userToken == null ? 'ورود و ثبت' : 'ثبت آی‌پی'),
+                    style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700),
+                  ),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFFFF3B5C),
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    elevation: 0,
+                  ),
+                ),
+              ),
+            ],
           ),
         ],
       ),
@@ -2132,6 +2446,7 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
   }
 
   Future<void> _handleLogout() async {
+    _ipCheckTimer?.cancel();
     if (_userToken != null) {
       // Invalidate on server
       ApiService.logout(_userToken!);
@@ -2142,6 +2457,8 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
     setState(() {
       _userToken = null;
       _userData = null;
+      _currentDetectedIp = null;
+      _lastRegisteredIp = null;
       _isConnected = false;
       _currentNavIndex = 0;
     });

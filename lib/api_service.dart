@@ -305,22 +305,56 @@ class ApiService {
     }
   }
 
-  /// Register Current Device IP in System
-  static Future<bool> registerIp(String token) async {
+  /// Detect Current Public IP from Server
+  static Future<String?> detectIp() async {
     try {
+      final response = await http.get(
+        Uri.parse('$baseUrl/api/user/detect-ip'),
+        headers: {'User-Agent': userAgent},
+      ).timeout(const Duration(seconds: 8));
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(utf8.decode(response.bodyBytes));
+        final ip = data['ip']?.toString().trim();
+        if (ip != null && ip.isNotEmpty) {
+          return ip;
+        }
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  /// Register Device IP in System
+  static Future<Map<String, dynamic>> registerIp(String token, {String? manualIp}) async {
+    try {
+      final bodyMap = <String, dynamic>{'token': token};
+      if (manualIp != null && manualIp.trim().isNotEmpty) {
+        bodyMap['manual_ip'] = manualIp.trim();
+      }
       final response = await http.post(
         Uri.parse('$baseUrl/api/user/register-ip'),
         headers: {
           'Content-Type': 'application/json',
           'User-Agent': userAgent,
         },
-        body: jsonEncode({'token': token}),
+        body: jsonEncode(bodyMap),
       ).timeout(const Duration(seconds: 10));
 
       final data = jsonDecode(utf8.decode(response.bodyBytes));
-      return response.statusCode == 200 && (data['status'] == 'success' || data['success'] == true);
-    } catch (_) {
-      return false;
+      if (response.statusCode == 200 && (data['status'] == 'success' || data['success'] == true)) {
+        return {
+          'success': true,
+          'registered_ip': data['registered_ip'] ?? manualIp ?? '',
+          'message': data['message'] ?? 'آی‌پی با موفقیت ثبت شد.',
+        };
+      } else {
+        return {
+          'success': false,
+          'message': data['detail'] ?? data['message'] ?? 'خطا در ثبت آی‌پی.',
+        };
+      }
+    } catch (e) {
+      return {'success': false, 'message': 'خطا در برقراری ارتباط با سرور.'};
     }
   }
 
