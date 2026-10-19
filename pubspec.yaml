@@ -1,7 +1,7 @@
 name: ryzer_dns_android
 description: "RyzerDNS Android Accelerator Client"
 publish_to: 'none'
-version: 1.0.3+16
+version: 1.0.3+17
 
 environment:
   sdk: '>=3.0.0 <4.0.0'

@@ -796,49 +796,6 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
       displayIpText = 'شناسایی‌نشده';
     }
 
-    // Status Badge determination
-    final String badgeText;
-    final Color badgeColor;
-    final Color badgeBg;
-    final Color badgeBorder;
-
-    if (_isDetectingIp) {
-      badgeText = 'در حال بررسی';
-      badgeColor = const Color(0xFF00E5FF);
-      badgeBg = const Color(0x1A00E5FF);
-      badgeBorder = const Color(0x6600E5FF);
-    } else if (isSynced) {
-      badgeText = 'همگام و ثبت‌شده';
-      badgeColor = const Color(0xFF00E676);
-      badgeBg = const Color(0x1A00E676);
-      badgeBorder = const Color(0x6600E676);
-    } else if (_userToken != null) {
-      if (hasDetected) {
-        badgeText = 'نیاز به ثبت';
-        badgeColor = const Color(0xFFFFB800);
-        badgeBg = const Color(0x1AFFB800);
-        badgeBorder = const Color(0x66FFB800);
-      } else {
-        badgeText = 'آفلاین / نامشخص';
-        badgeColor = Colors.white54;
-        badgeBg = const Color(0x0DFFFFFF);
-        badgeBorder = const Color(0x1AFFFFFF);
-      }
-    } else {
-      // User is NOT logged in
-      if (hasDetected) {
-        badgeText = 'نیاز به ورود';
-        badgeColor = const Color(0xFFFFB800);
-        badgeBg = const Color(0x1AFFB800);
-        badgeBorder = const Color(0x66FFB800);
-      } else {
-        badgeText = 'نامشخص';
-        badgeColor = Colors.white38;
-        badgeBg = const Color(0x0DFFFFFF);
-        badgeBorder = const Color(0x1AFFFFFF);
-      }
-    }
-
     return Container(
       width: double.infinity,
       margin: const EdgeInsets.only(top: 14),
@@ -847,9 +804,7 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
         color: const Color(0xFF14141E),
         borderRadius: BorderRadius.circular(14),
         border: Border.all(
-          color: isSynced
-              ? const Color(0x4D00E676)
-              : const Color(0x1FFFFFFF),
+          color: const Color(0x1FFFFFFF),
           width: 1.2,
         ),
       ),
@@ -857,65 +812,26 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Row(
-                children: [
-                  Container(
-                    padding: const EdgeInsets.all(7),
-                    decoration: BoxDecoration(
-                      color: isSynced
-                          ? const Color(0x1A00E676)
-                          : const Color(0x1AFF3B5C),
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Icon(
-                      Icons.router_rounded,
-                      color: isSynced
-                          ? const Color(0xFF00E676)
-                          : const Color(0xFFFF3B5C),
-                      size: 18,
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  const Text(
-                    'آدرس آی‌پی دستگاه',
-                    style: TextStyle(
-                      fontSize: 13.5,
-                      fontWeight: FontWeight.w800,
-                      color: Colors.white,
-                    ),
-                  ),
-                ],
-              ),
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3.5),
+                padding: const EdgeInsets.all(7),
                 decoration: BoxDecoration(
-                  color: badgeBg,
-                  borderRadius: BorderRadius.circular(6),
-                  border: Border.all(color: badgeBorder),
+                  color: const Color(0x1AFF3B5C),
+                  borderRadius: BorderRadius.circular(8),
                 ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Container(
-                      width: 6,
-                      height: 6,
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        color: badgeColor,
-                      ),
-                    ),
-                    const SizedBox(width: 5),
-                    Text(
-                      badgeText,
-                      style: TextStyle(
-                        fontSize: 10.5,
-                        fontWeight: FontWeight.w700,
-                        color: badgeColor,
-                      ),
-                    ),
-                  ],
+                child: const Icon(
+                  Icons.router_rounded,
+                  color: Color(0xFFFF3B5C),
+                  size: 18,
+                ),
+              ),
+              const SizedBox(width: 8),
+              const Text(
+                'آدرس آی‌پی دستگاه',
+                style: TextStyle(
+                  fontSize: 13.5,
+                  fontWeight: FontWeight.w800,
+                  color: Colors.white,
                 ),
               ),
             ],
@@ -960,6 +876,14 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
                           child: CircularProgressIndicator(
                             strokeWidth: 2,
                             valueColor: AlwaysStoppedAnimation<Color>(Color(0xFF00E5FF)),
+                          ),
+                        )
+                      else
+                        GestureDetector(
+                          onTap: _detectCurrentIpOnly,
+                          child: const Padding(
+                            padding: EdgeInsets.all(4),
+                            child: Icon(Icons.refresh_rounded, size: 16, color: Color(0xFFA0A0B0)),
                           ),
                         ),
                     ],
