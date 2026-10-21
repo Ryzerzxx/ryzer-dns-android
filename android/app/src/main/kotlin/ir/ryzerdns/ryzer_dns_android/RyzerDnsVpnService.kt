@@ -150,8 +150,8 @@ class RyzerDnsVpnService : VpnService() {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) PendingIntent.FLAG_IMMUTABLE else 0
         )
 
-        val title = if (enableDoh) "اتصال فوق‌العاده RyzerDNS (DoT) فعال است" else "RyzerDNS فعال است"
-        val subtitle = if (enableDoh) "پروتکل پرایوت دی‌ان‌اس (Port 853) فعال شد" else "مسیرهای شبکه و بازی‌ها بهینه‌سازی شد"
+        val title = "RyzerDNS فعال است"
+        val subtitle = "مسیرهای شبکه و بازی‌ها بهینه‌سازی شد"
 
         val notification: Notification = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             Notification.Builder(this, CHANNEL_ID)
@@ -187,7 +187,7 @@ class RyzerDnsVpnService : VpnService() {
 
         try {
             val builder = Builder()
-            builder.setSession(if (enableDoh) "RyzerDNS-Ultra" else "RyzerDNS")
+            builder.setSession("RyzerDNS")
             builder.setMtu(1500)
 
             if (enableDoh) {

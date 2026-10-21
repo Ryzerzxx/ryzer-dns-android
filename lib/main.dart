@@ -98,7 +98,7 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
   }
 
   void _checkAndPromptUpdate(Map<String, dynamic> cfg) {
-    const currentAppVersion = "1.0.3";
+    const currentAppVersion = "1.1";
     final latestVersion = cfg['latest_version'] ?? currentAppVersion;
     final isExplicitUpdate = cfg['update_available'] == true;
     final isHigherVersionAvailable = _isVersionLower(currentAppVersion, latestVersion);
@@ -602,7 +602,7 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
                     const Icon(Icons.person, size: 14, color: Color(0xFFFF3B5C)),
                     const SizedBox(width: 6),
                     Text(
-                      _userData!['display_name'] ?? _userData!['username'] ?? 'حساب من',
+                      'حساب کاربری',
                       style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: Colors.white),
                     ),
                   ],
@@ -2083,6 +2083,13 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
           leading: const Icon(Icons.logout, color: Color(0xFFFF3B5C)),
           title: const Text('خروج از حساب کاربری', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: Color(0xFFFF3B5C))),
           onTap: _handleLogout,
+        ),
+        const SizedBox(height: 18),
+        const Center(
+          child: Text(
+            'RyzerDNS Client • نسخه v1.1',
+            style: TextStyle(fontSize: 11.5, color: Colors.white38, fontWeight: FontWeight.w600),
+          ),
         ),
       ],
     );
