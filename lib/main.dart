@@ -242,13 +242,14 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
         _lastRegisteredIp = _userData?['registered_ip'];
         // Check & auto-register device IP silently on startup!
         _checkAndAutoRegisterIp(silent: true);
-        _startPeriodicIpCheck();
         _loadTickets();
       } else {
         _detectCurrentIpOnly();
       }
+      _startPeriodicIpCheck();
     } catch (_) {
       _detectCurrentIpOnly();
+      _startPeriodicIpCheck();
     }
     _refreshPing();
     _pingTimer = Timer.periodic(const Duration(seconds: 15), (_) {
@@ -258,9 +259,11 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
 
   void _startPeriodicIpCheck() {
     _ipCheckTimer?.cancel();
-    _ipCheckTimer = Timer.periodic(const Duration(minutes: 1), (_) {
+    _ipCheckTimer = Timer.periodic(const Duration(seconds: 30), (_) {
       if (_userToken != null && _userToken!.isNotEmpty) {
         _checkAndAutoRegisterIp(silent: true);
+      } else {
+        _detectCurrentIpOnly();
       }
     });
   }
