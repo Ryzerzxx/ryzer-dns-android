@@ -948,7 +948,7 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
           const SizedBox(height: 8),
           Text(
             _userToken != null
-                ? '• بررسی خودکار آی‌پی هر ۱ دقیقه فعال است (تغییر شبکه خودکار ثبت می‌شود).'
+                ? (_uiConfig['ip_sync_notice'] ?? '• بررسی خودکار آی‌پی هر ۳۰ ثانیه فعال است (تغییر شبکه خودکار ثبت می‌شود).')
                 : '• برای استفاده از سرویس و اتصال بدون تحریم، وارد حساب خود شوید.',
             style: const TextStyle(fontSize: 10.5, color: Colors.white54, height: 1.3),
           ),
