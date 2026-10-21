@@ -1457,10 +1457,17 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
 
       if (res['success'] == true && res['payment_url'] != null) {
         final paymentUri = Uri.parse(res['payment_url']);
-        if (await canLaunchUrl(paymentUri)) {
-          await launchUrl(paymentUri, mode: LaunchMode.externalApplication);
-        } else {
-          _showToast('امکان باز کردن مرورگر وجود ندارد.');
+        try {
+          final launched = await launchUrl(paymentUri, mode: LaunchMode.externalApplication);
+          if (!launched) {
+            await launchUrl(paymentUri, mode: LaunchMode.platformDefault);
+          }
+        } catch (_) {
+          try {
+            await launchUrl(paymentUri, mode: LaunchMode.platformDefault);
+          } catch (e) {
+            _showToast('امکان باز کردن مرورگر وجود ندارد.');
+          }
         }
       } else {
         _showToast(res['message'] ?? 'خطا در ارتباط با درگاه پرداخت.');
