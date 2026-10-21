@@ -769,7 +769,12 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
               elevation: 0,
             ),
-            child: const Text('تمدید / ارتقا', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700)),
+            child: Text(
+              isExpired
+                  ? 'خرید اشتراک'
+                  : (tier.toLowerCase() == 'pro' ? 'تمدید اشتراک' : 'تمدید یا ارتقا'),
+              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
+            ),
           ),
         ],
       ),
@@ -1237,47 +1242,105 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
                 ),
               )),
           const Divider(color: Color(0x1AFFFFFF), height: 24),
-          Row(
-            children: [
-              Expanded(
-                child: OutlinedButton(
-                  onPressed: () => _handlePurchasePlan(tier, 1, price1m),
-                  style: OutlinedButton.styleFrom(
-                    side: const BorderSide(color: Color(0x4DFFFFFF)),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                    padding: const EdgeInsets.symmetric(vertical: 8),
+          if (_userToken != null &&
+              _userData != null &&
+              _userData!['is_expired'] != true &&
+              _userData!['is_trial'] != true &&
+              (_userData!['plan_tier'] ?? '').toString().toLowerCase() == 'pro' &&
+              !isPro)
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(vertical: 12),
+              decoration: BoxDecoration(
+                color: const Color(0x0AFFFFFF),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: const Color(0x1AFFFFFF)),
+              ),
+              child: const Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.block_rounded, size: 14, color: Color(0xFF8E8EA8)),
+                  SizedBox(width: 6),
+                  Text(
+                    'پلن فعال شما Ryzer PRO است (غیرقابل تنزل)',
+                    style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: Color(0xFF8E8EA8)),
                   ),
-                  child: Column(
-                    children: [
-                      const Text('۱ ماهه', style: TextStyle(fontSize: 11, color: Color(0xFFA0A0B0))),
-                      const SizedBox(height: 2),
-                      Text(price1m, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w800, color: Colors.white)),
-                    ],
-                  ),
+                ],
+              ),
+            )
+          else if (_userToken != null &&
+              _userData != null &&
+              _userData!['is_expired'] != true &&
+              _userData!['is_trial'] != true &&
+              (_userData!['plan_tier'] ?? '').toString().toLowerCase() == 'plus' &&
+              isPro)
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton.icon(
+                onPressed: () {
+                  _showToast('اشتراک فعال شما PLUS است. جهت ارتقا به پلن پرو، لطفاً از پنل کاربری وب‌سایت گزینه ارتقا به PRO را انتخاب فرمایید.');
+                },
+                icon: const Icon(Icons.upgrade_rounded, size: 16),
+                label: const Text('ارتقا به پلن PRO (مابه‌التفاوت)', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800)),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFFFF3B5C),
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 10),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                 ),
               ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: ElevatedButton(
-                  onPressed: () => _handlePurchasePlan(tier, 3, price3m),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: isPro ? const Color(0xFFFF3B5C) : const Color(0x33FFFFFF),
-                    foregroundColor: Colors.white,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                    padding: const EdgeInsets.symmetric(vertical: 8),
-                    elevation: 0,
-                  ),
-                  child: Column(
-                    children: [
-                      const Text('۳ ماهه', style: TextStyle(fontSize: 11, color: Colors.white70)),
-                      const SizedBox(height: 2),
-                      Text(price3m, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w800, color: Colors.white)),
-                    ],
+            )
+          else
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton(
+                    onPressed: () => _handlePurchasePlan(tier, 1, price1m),
+                    style: OutlinedButton.styleFrom(
+                      side: const BorderSide(color: Color(0x4DFFFFFF)),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                      padding: const EdgeInsets.symmetric(vertical: 8),
+                    ),
+                    child: Column(
+                      children: [
+                        Text(
+                          (_userToken != null && _userData != null && _userData!['is_expired'] != true && _userData!['is_trial'] != true)
+                              ? 'تمدید ۱ ماهه'
+                              : '۱ ماهه',
+                          style: const TextStyle(fontSize: 11, color: Color(0xFFA0A0B0)),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(price1m, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w800, color: Colors.white)),
+                      ],
+                    ),
                   ),
                 ),
-              ),
-            ],
-          ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: ElevatedButton(
+                    onPressed: () => _handlePurchasePlan(tier, 3, price3m),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: isPro ? const Color(0xFFFF3B5C) : const Color(0x33FFFFFF),
+                      foregroundColor: Colors.white,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                      padding: const EdgeInsets.symmetric(vertical: 8),
+                      elevation: 0,
+                    ),
+                    child: Column(
+                      children: [
+                        Text(
+                          (_userToken != null && _userData != null && _userData!['is_expired'] != true && _userData!['is_trial'] != true)
+                              ? 'تمدید ۳ ماهه'
+                              : '۳ ماهه',
+                          style: const TextStyle(fontSize: 11, color: Colors.white70)),
+                        const SizedBox(height: 2),
+                        Text(price3m, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w800, color: Colors.white)),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
         ],
       ),
     );
@@ -1289,12 +1352,15 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
       return;
     }
 
+    if (_userData == null) {
+      await _refreshUserProfile();
+    }
+
     // Enforce Subscription Business Logic:
     if (_userData != null) {
       final userTier = (_userData!['plan_tier'] ?? '').toString().toLowerCase();
       final isExpired = _userData!['is_expired'] == true;
       final isTrial = _userData!['is_trial'] == true;
-      final hasPaid = _userData!['has_paid'] == true;
 
       // If user has active PRO and is NOT in a 6-hour trial, block buying Plus
       if (!isExpired && !isTrial) {
@@ -1303,7 +1369,7 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
           return;
         }
         if (userTier == 'plus' && tier.toLowerCase() == 'pro') {
-          _showToast('اشتراک فعال شما PLUS است. جهت ارتقا به پلن پرو، لطفاً از پنل کاربری سایت گزینه ارتقا به PRO را انتخاب فرمایید.');
+          _showToast('اشتراک فعال شما PLUS است. جهت ارتقا به پلن پرو، لطفاً از پنل کاربری وب‌سایت گزینه ارتقا به PRO را انتخاب فرمایید.');
           return;
         }
       }
