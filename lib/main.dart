@@ -1546,7 +1546,7 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
   // ══════════════════════════════════════════════════════════════════════════
   // 💬 TAB 3: SUPPORT, TICKETS & DOMAIN REQUESTS (Mirrors Website Perfectly)
   // ══════════════════════════════════════════════════════════════════════════
-  int _supportCategoryIndex = 0; // 0: تیکت, 1: فیدبک, 2: درخواست دامنه
+  int _supportCategoryIndex = 0; // 0: تیکت, 1: درخواست دامنه
   final _ticketSubjectCtrl = TextEditingController();
   final _ticketMessageCtrl = TextEditingController();
   bool _isSubmittingTicket = false;
@@ -1556,12 +1556,18 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
   void _loadTickets() async {
     if (_userToken == null) return;
     setState(() => _isLoadingTickets = true);
-    final tickets = await ApiService.getTicketsList(_userToken!);
-    if (mounted) {
-      setState(() {
-        _myTickets = tickets;
-        _isLoadingTickets = false;
-      });
+    try {
+      final tickets = await ApiService.getTicketsList(_userToken!);
+      if (mounted) {
+        setState(() {
+          _myTickets = tickets;
+          _isLoadingTickets = false;
+        });
+      }
+    } catch (_) {
+      if (mounted) {
+        setState(() => _isLoadingTickets = false);
+      }
     }
   }
 
@@ -1575,7 +1581,7 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
       _showToast('متن پیام نمی‌تواند خالی باشد.');
       return;
     }
-    final categories = ['تیکت', 'فیدبک', 'درخواست دامنه'];
+    final categories = ['تیکت', 'درخواست دامنه'];
     final category = categories[_supportCategoryIndex];
     final subject = _ticketSubjectCtrl.text.trim().isEmpty ? category : _ticketSubjectCtrl.text.trim();
 
@@ -1591,7 +1597,7 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
     if (res['status'] == 'success') {
       _ticketSubjectCtrl.clear();
       _ticketMessageCtrl.clear();
-      _showToast('تیکت شما با موفقیت ثبت شد و کد پیگیری صادر گردید.');
+      _showToast('پیام شما با موفقیت ثبت شد.');
       _loadTickets();
     } else {
       _showToast(res['detail'] ?? 'خطا در ثبت پیام');
@@ -1631,6 +1637,9 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
     if (_userToken == null) return;
     final replyCtrl = TextEditingController();
     bool isReplying = false;
+    bool isLoading = true;
+    Map<String, dynamic>? ticketData;
+    List<dynamic> messagesList = [];
 
     showModalBottomSheet(
       context: context,
@@ -1642,154 +1651,180 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
       ),
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setModalState) {
-          return FutureBuilder<Map<String, dynamic>>(
-            future: ApiService.getTicketHistory(_userToken!, ticketId),
-            builder: (context, snapshot) {
-              final data = snapshot.data;
-              final messages = (data?['messages'] as List?) ?? [];
-              final ticket = data?['ticket'] as Map<String, dynamic>?;
-              final status = ticket?['status'] ?? 'open';
+          void fetchChatHistory() async {
+            try {
+              final res = await ApiService.getTicketHistory(_userToken!, ticketId);
+              if (ctx.mounted) {
+                setModalState(() {
+                  ticketData = res['ticket'] as Map<String, dynamic>?;
+                  messagesList = (res['messages'] as List?) ?? [];
+                  isLoading = false;
+                });
+              }
+            } catch (_) {
+              if (ctx.mounted) {
+                setModalState(() => isLoading = false);
+              }
+            }
+          }
 
-              return Padding(
-                padding: EdgeInsets.only(
-                  bottom: MediaQuery.of(ctx).viewInsets.bottom + 20,
-                  left: 18,
-                  right: 18,
-                  top: 18,
-                ),
-                child: SizedBox(
-                  height: MediaQuery.of(ctx).size.height * 0.75,
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
+          if (isLoading && ticketData == null) {
+            fetchChatHistory();
+          }
+
+          final status = ticketData?['status'] ?? 'open';
+          final isAnswered = status != 'open';
+
+          return Padding(
+            padding: EdgeInsets.only(
+              bottom: MediaQuery.of(ctx).viewInsets.bottom + 20,
+              left: 18,
+              right: 18,
+              top: 18,
+            ),
+            child: SizedBox(
+              height: MediaQuery.of(ctx).size.height * 0.78,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          IconButton(
-                            icon: const Icon(Icons.close, color: Colors.white70),
-                            onPressed: () => Navigator.pop(ctx),
-                          ),
-                          Expanded(
-                            child: Text(
-                              'پیگیری تیکت #$ticketId ($subject)',
-                              textAlign: TextAlign.center,
-                              style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13, color: Colors.white),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                            decoration: BoxDecoration(
-                              color: status == 'open' ? const Color(0x26FFAB00) : const Color(0x2600E676),
-                              borderRadius: BorderRadius.circular(6),
-                              border: Border.all(color: status == 'open' ? const Color(0xFFFFAB00) : const Color(0xFF00E676)),
-                            ),
-                            child: Text(
-                              status == 'open' ? 'در انتظار بررسی' : 'پاسخ داده شد',
-                              style: TextStyle(
-                                fontSize: 10,
-                                fontWeight: FontWeight.w800,
-                                color: status == 'open' ? const Color(0xFFFFAB00) : const Color(0xFF00E676),
-                              ),
-                            ),
-                          ),
-                        ],
+                      IconButton(
+                        icon: const Icon(Icons.close, color: Colors.white70),
+                        onPressed: () => Navigator.pop(ctx),
                       ),
-                      const Divider(color: Color(0x1AFFFFFF), height: 24),
                       Expanded(
-                        child: snapshot.connectionState == ConnectionState.waiting
-                            ? const Center(child: CircularProgressIndicator(color: Color(0xFFFF3B5C)))
-                            : messages.isEmpty
-                                ? const Center(child: Text('پیامی یافت نشد.', style: TextStyle(color: Colors.white54)))
-                                : ListView.builder(
-                                    reverse: false,
-                                    itemCount: messages.length,
-                                    itemBuilder: (context, idx) {
-                                      final m = messages[idx];
-                                      final isUser = m['sender_type'] == 'user';
-                                      return Align(
-                                        alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
-                                        child: Container(
-                                          margin: const EdgeInsets.symmetric(vertical: 6),
-                                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                                          constraints: BoxConstraints(maxWidth: MediaQuery.of(ctx).size.width * 0.8),
-                                          decoration: BoxDecoration(
-                                            color: isUser ? const Color(0x26FF3B5C) : const Color(0xFF1E1E2A),
-                                            borderRadius: BorderRadius.circular(12),
-                                            border: Border.all(
-                                              color: isUser ? const Color(0x4DFF3B5C) : const Color(0x33FFFFFF),
-                                            ),
-                                          ),
-                                          child: Column(
-                                            crossAxisAlignment: isUser ? CrossAxisAlignment.end : CrossAxisAlignment.start,
-                                            children: [
-                                              Text(
-                                                isUser ? (m['sender_name'] ?? 'شما') : 'پشتیبانی فنی Ryzer',
-                                                style: TextStyle(
-                                                  fontSize: 11,
-                                                  fontWeight: FontWeight.w800,
-                                                  color: isUser ? const Color(0xFFFF8595) : const Color(0xFF00E676),
-                                                ),
-                                              ),
-                                              const SizedBox(height: 4),
-                                              _buildFormattedChatMessage(m['message'] ?? ''),
-                                              const SizedBox(height: 4),
-                                              Text(
-                                                (m['created_at'] ?? '').toString().replaceFirst('T', ' ').split('.')[0],
-                                                style: const TextStyle(fontSize: 9.5, color: Colors.white38),
-                                              ),
-                                            ],
-                                          ),
-                                        ),
-                                      );
-                                    },
-                                  ),
+                        child: Text(
+                          'پیگیری تیکت #$ticketId ($subject)',
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13, color: Colors.white),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
                       ),
-                      const SizedBox(height: 12),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: TextField(
-                              controller: replyCtrl,
-                              style: const TextStyle(color: Colors.white, fontSize: 13),
-                              decoration: InputDecoration(
-                                hintText: 'ارسال پاسخ یا پیام تکمیلی...',
-                                hintStyle: const TextStyle(color: Colors.white38, fontSize: 12),
-                                filled: true,
-                                fillColor: const Color(0xFF14141E),
-                                contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                                border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none),
-                              ),
-                            ),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: isAnswered ? const Color(0x2600E676) : const Color(0x26FFAB00),
+                          borderRadius: BorderRadius.circular(6),
+                          border: Border.all(color: isAnswered ? const Color(0xFF00E676) : const Color(0xFFFFAB00)),
+                        ),
+                        child: Text(
+                          isAnswered ? 'پاسخ داده شد' : 'در انتظار بررسی',
+                          style: TextStyle(
+                            fontSize: 10,
+                            fontWeight: FontWeight.w800,
+                            color: isAnswered ? const Color(0xFF00E676) : const Color(0xFFFFAB00),
                           ),
-                          const SizedBox(width: 8),
-                          isReplying
-                              ? const SizedBox(width: 32, height: 32, child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFFFF3B5C)))
-                              : IconButton(
-                                  icon: const Icon(Icons.send_rounded, color: Color(0xFFFF3B5C)),
-                                  onPressed: () async {
-                                    final text = replyCtrl.text.trim();
-                                    if (text.isEmpty) return;
-                                    setModalState(() => isReplying = true);
-                                    final res = await ApiService.replyTicket(token: _userToken!, ticketId: ticketId, message: text);
-                                    setModalState(() => isReplying = false);
-                                    if (res['status'] == 'success') {
-                                      replyCtrl.clear();
-                                      setModalState(() {});
-                                      _loadTickets();
-                                    } else {
-                                      _showToast(res['detail'] ?? 'خطا در ارسال پاسخ');
-                                    }
-                                  },
-                                ),
-                        ],
+                        ),
                       ),
                     ],
                   ),
-                ),
-              );
-            },
+                  const Divider(color: Color(0x1AFFFFFF), height: 20),
+                  Expanded(
+                    child: isLoading
+                        ? const Center(child: CircularProgressIndicator(color: Color(0xFFFF3B5C)))
+                        : messagesList.isEmpty
+                            ? const Center(child: Text('پیامی یافت نشد.', style: TextStyle(color: Colors.white54)))
+                            : ListView.builder(
+                                reverse: false,
+                                itemCount: messagesList.length,
+                                itemBuilder: (context, idx) {
+                                  final m = messagesList[idx];
+                                  final isUser = m['sender_type'] == 'user';
+                                  return Align(
+                                    alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
+                                    child: Container(
+                                      margin: const EdgeInsets.symmetric(vertical: 6),
+                                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                                      constraints: BoxConstraints(maxWidth: MediaQuery.of(ctx).size.width * 0.85),
+                                      decoration: BoxDecoration(
+                                        color: isUser ? const Color(0x26FF3B5C) : const Color(0xFF141F18),
+                                        borderRadius: BorderRadius.circular(12),
+                                        border: Border.all(
+                                          color: isUser ? const Color(0x4DFF3B5C) : const Color(0x8000E676),
+                                          width: isUser ? 1.0 : 1.5,
+                                        ),
+                                      ),
+                                      child: Column(
+                                        crossAxisAlignment: isUser ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+                                        children: [
+                                          Row(
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: [
+                                              Icon(
+                                                isUser ? Icons.person_outline : Icons.admin_panel_settings_rounded,
+                                                size: 14,
+                                                color: isUser ? const Color(0xFFFF8595) : const Color(0xFF00E676),
+                                              ),
+                                              const SizedBox(width: 4),
+                                              Text(
+                                                isUser ? (m['sender_name'] ?? 'شما') : 'پاسخ مدیر پشتیبانی',
+                                                style: TextStyle(
+                                                  fontSize: 11.5,
+                                                  fontWeight: FontWeight.w900,
+                                                  color: isUser ? const Color(0xFFFF8595) : const Color(0xFF00E676),
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                          const SizedBox(height: 6),
+                                          _buildFormattedChatMessage(m['message'] ?? ''),
+                                          const SizedBox(height: 4),
+                                          Text(
+                                            (m['created_at'] ?? '').toString().replaceFirst('T', ' ').split('.')[0],
+                                            style: const TextStyle(fontSize: 9.5, color: Colors.white38),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  );
+                                },
+                              ),
+                  ),
+                  const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: replyCtrl,
+                          style: const TextStyle(color: Colors.white, fontSize: 13),
+                          decoration: InputDecoration(
+                            hintText: 'ارسال پاسخ یا پیام تکمیلی...',
+                            hintStyle: const TextStyle(color: Colors.white38, fontSize: 12),
+                            filled: true,
+                            fillColor: const Color(0xFF14141E),
+                            contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                            border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      isReplying
+                          ? const SizedBox(width: 32, height: 32, child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFFFF3B5C)))
+                          : IconButton(
+                              icon: const Icon(Icons.send_rounded, color: Color(0xFFFF3B5C)),
+                              onPressed: () async {
+                                final text = replyCtrl.text.trim();
+                                if (text.isEmpty) return;
+                                setModalState(() => isReplying = true);
+                                final res = await ApiService.replyTicket(token: _userToken!, ticketId: ticketId, message: text);
+                                setModalState(() => isReplying = false);
+                                if (res['status'] == 'success') {
+                                  replyCtrl.clear();
+                                  fetchChatHistory();
+                                  _loadTickets();
+                                } else {
+                                  _showToast(res['detail'] ?? 'خطا در ارسال پاسخ');
+                                }
+                              },
+                            ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
           );
         },
       ),
@@ -1834,7 +1869,7 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
       );
     }
 
-    final categories = ['ارسال تیکت پشتیبانی', 'ارسال نظر و فیدبک', 'درخواست افزودن دامنه'];
+    final categories = ['تیکت پشتیبانی', 'درخواست دامنه'];
 
     return RefreshIndicator(
       onRefresh: () async => _loadTickets(),
@@ -1918,11 +1953,9 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
                   maxLines: 4,
                   style: const TextStyle(color: Colors.white, fontSize: 13),
                   decoration: InputDecoration(
-                    hintText: _supportCategoryIndex == 2
+                    hintText: _supportCategoryIndex == 1
                         ? 'آدرس دامنه یا نام بازی مورد نظر جهت رفع تحریم را بنویسید...'
-                        : _supportCategoryIndex == 1
-                            ? 'پیشنهاد، نظر یا انتقاد خود را برای بهبود سرویس بنویسید...'
-                            : 'توضیحات کامل مشکل خود، نوع کنسول/سیستم و اپراتور اینترنت را بنویسید...',
+                        : 'توضیحات کامل مشکل خود، نوع کنسول/سیستم و اپراتور اینترنت را بنویسید...',
                     hintStyle: const TextStyle(color: Colors.white38, fontSize: 12),
                     filled: true,
                     fillColor: const Color(0xFF14141E),
@@ -1957,10 +1990,8 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
                                   const SizedBox(width: 8),
                                   Text(
                                     _supportCategoryIndex == 0
-                                        ? 'ثبت تیکت و دریافت کد پیگیری'
-                                        : _supportCategoryIndex == 1
-                                            ? 'ارسال نظر و فیدبک'
-                                            : 'ارسال درخواست دامنه',
+                                        ? 'ثبت تیکت پشتیبانی'
+                                        : 'ارسال درخواست دامنه',
                                     style: const TextStyle(
                                       fontFamily: 'Vazirmatn',
                                       fontSize: 13,
@@ -2422,7 +2453,12 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
       ),
       child: BottomNavigationBar(
         currentIndex: _currentNavIndex,
-        onTap: (idx) => setState(() => _currentNavIndex = idx),
+        onTap: (idx) {
+          setState(() => _currentNavIndex = idx);
+          if (idx == 2) {
+            _loadTickets();
+          }
+        },
         backgroundColor: Colors.transparent,
         elevation: 0,
         selectedItemColor: const Color(0xFFFF3B5C),
