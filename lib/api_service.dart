@@ -4,6 +4,7 @@ import 'package:http/http.dart' as http;
 class ApiService {
   static const String baseUrl = 'https://ryzerdns.ir';
   static const String userAgent = 'RyzerDNS-AndroidClient/2.0';
+  static const String buildChannel = 'direct'; // 'direct' for website APK, 'myket' for store builds
 
   /// Standard Login with Username/Email & Password
   static Future<Map<String, dynamic>> login(String username, String password) async {
@@ -374,8 +375,11 @@ class ApiService {
   static Future<Map<String, dynamic>> getRemoteConfig() async {
     try {
       final response = await http.get(
-        Uri.parse('$baseUrl/api/app/config'),
-        headers: {'User-Agent': userAgent},
+        Uri.parse('$baseUrl/api/app/config?channel=$buildChannel'),
+        headers: {
+          'User-Agent': userAgent,
+          'X-App-Channel': buildChannel,
+        },
       ).timeout(const Duration(seconds: 8));
 
       if (response.statusCode == 200) {
