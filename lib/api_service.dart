@@ -4,7 +4,7 @@ import 'package:http/http.dart' as http;
 class ApiService {
   static const String baseUrl = 'https://ryzerdns.ir';
   static const String userAgent = 'RyzerDNS-AndroidClient/2.0';
-  static const String buildChannel = 'direct'; // 'direct' for website APK, 'myket' for store builds
+  static const String buildChannel = 'myket'; // 'direct' for website APK, 'myket' for store builds
 
   /// Standard Login with Username/Email & Password
   static Future<Map<String, dynamic>> login(String username, String password) async {

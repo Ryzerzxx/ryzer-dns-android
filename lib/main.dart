@@ -4,6 +4,10 @@ import 'package:flutter/services.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:myket_iap/myket_iap.dart';
+import 'package:myket_iap/util/iab_result.dart';
+import 'package:myket_iap/util/inventory.dart';
+import 'package:myket_iap/util/purchase.dart';
 import 'api_service.dart';
 import 'vpn_manager.dart';
 
@@ -87,6 +91,15 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
     _loadStoredSession();
     _fetchRemoteConfig();
     _loadTickets();
+    _initMyketBilling();
+  }
+
+  static const String _myketRsaKey = "MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQCSFZFMD07zzp9eOG95m3Swifaa9unu21AJqjNVKKc/EuGHa7OWlCymw4ngTIQI4gYN3Je7UNavxl7bM+yUJrQpELAQvvUdEoLjR6Prja3Lk9BMvibgbYEGRHiM9avLSt3kRSIruJntUh3/CeNL9DhL/pZzwxeOURv92zmqenoQMwIDAQAB";
+
+  void _initMyketBilling() async {
+    try {
+      await MyketIAP.init(rsaKey: _myketRsaKey, enableDebugLogging: false);
+    } catch (_) {}
   }
 
   Future<void> _fetchRemoteConfig() async {
@@ -1469,7 +1482,7 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
               ),
               const SizedBox(height: 12),
               const Text(
-                'پرداخت امن از طریق درگاه رسمی انجام می‌شود و اشتراک بلافاصله فعال می‌گردد.',
+                'پرداخت امن از طریق مایکت انجام می‌شود و اشتراک بلافاصله فعال می‌گردد.',
                 style: TextStyle(fontSize: 11, color: Color(0xFFA0A0B0), height: 1.5),
                 textAlign: TextAlign.center,
               ),
@@ -1514,35 +1527,68 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
 
     if (confirm != true) return;
 
-    // 💳 ZarinPal Direct Payment Gateway Flow
+    // 🛍️ Myket In-App Billing ONLY (Official Myket IAB SDK)
+    final sku = '${tier.toLowerCase()}_${months}m';
     try {
-      _showToast('در حال انتقال به درگاه پرداخت...');
-      final res = await ApiService.requestPayment(
-        token: _userToken!,
-        planTier: tier,
-        durationMonths: months,
-        source: 'app',
+      _showToast('در حال اتصال به مایکت...');
+
+      // Ensure billing client is initialized with official RSA key
+      try {
+        await MyketIAP.init(rsaKey: _myketRsaKey, enableDebugLogging: false);
+      } catch (_) {}
+
+      final dynamic buyRes = await MyketIAP.launchPurchaseFlow(
+        sku: sku,
+        payload: _userToken,
       );
 
-      if (res['success'] == true && res['payment_url'] != null) {
-        final paymentUri = Uri.parse(res['payment_url']);
+      final IabResult? iabResult = buyRes[MyketIAP.RESULT];
+      final Purchase? purchase = buyRes[MyketIAP.PURCHASE];
+
+      if (iabResult != null && iabResult.isSuccess() && purchase != null) {
+        final purchaseToken = purchase.mToken;
+        _showToast('تراکنش با موفقیت انجام شد، در حال ثبت اشتراک...');
+
+        // Auto-consume consumable purchase so it can be renewed/repurchased
         try {
-          final launched = await launchUrl(paymentUri, mode: LaunchMode.externalApplication);
-          if (!launched) {
-            await launchUrl(paymentUri, mode: LaunchMode.platformDefault);
-          }
-        } catch (_) {
-          try {
-            await launchUrl(paymentUri, mode: LaunchMode.platformDefault);
-          } catch (e) {
-            _showToast('امکان باز کردن مرورگر وجود ندارد.');
-          }
+          await MyketIAP.consume(purchase: purchase);
+        } catch (_) {}
+
+        final valRes = await ApiService.verifyMyketPurchase(
+          token: _userToken!,
+          sku: sku,
+          purchaseToken: purchaseToken,
+        );
+        if (valRes['success'] == true) {
+          _showToast('اشتراک شما با موفقیت فعال شد!');
+          _refreshUserProfile();
+          setState(() {
+            _currentNavIndex = 0; // Return to Home
+          });
+        } else {
+          _showToast(valRes['message'] ?? 'خطا در تایید اشتراک مایکت');
+          return;
         }
       } else {
-        _showToast(res['message'] ?? 'خطا در ارتباط با درگاه پرداخت.');
+        if (iabResult != null && iabResult.mResponse == 1) { // USER_CANCELED
+          _showToast('پرداخت توسط شما لغو شد.');
+        } else if (iabResult != null && iabResult.mResponse == 7) { // ITEM_ALREADY_OWNED
+          _showToast('اشتراک قبلی شناسایی شد. در حال مصرف و بازیابی...');
+          try {
+            final invMap = await MyketIAP.queryInventory(querySkuDetails: false);
+            final Inventory? inv = invMap[MyketIAP.INVENTORY];
+            final owned = inv?.mPurchaseMap[sku];
+            if (owned != null) {
+              await MyketIAP.consume(purchase: owned);
+              _showToast('لطفاً مجدداً دکمه پرداخت را لمس فرمایید.');
+            }
+          } catch (_) {}
+        } else {
+          _showToast(iabResult?.mMessage ?? 'پرداخت انجام نشد.');
+        }
       }
     } catch (e) {
-      _showToast('خطا در ایجاد درخواست پرداخت.');
+      _showToast('خطا در اجرای فرآیند خرید مایکت.');
     }
   }
 

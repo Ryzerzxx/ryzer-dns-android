@@ -2,7 +2,7 @@ name: Build RyzerDNS Android APK
 
 on:
   push:
-    branches: [ main, master ]
+    branches: [ main, master, myket ]
   workflow_dispatch:
 
 jobs:
@@ -42,10 +42,10 @@ jobs:
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
-        if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
+        if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' || github.ref == 'refs/heads/myket'
         with:
-          tag_name: v1.0.3-build${{ github.run_number }}
-          name: RyzerDNS Android v1.0.3 Build ${{ github.run_number }}
+          tag_name: ${{ github.ref == 'refs/heads/myket' && format('v1.1.0-myket-b{0}', github.run_number) || format('v1.0.3-build{0}', github.run_number) }}
+          name: ${{ github.ref == 'refs/heads/myket' && format('RyzerDNS Android v1.1.0 (Myket Build {0})', github.run_number) || format('RyzerDNS Android v1.0.3 Build {0}', github.run_number) }}
           files: build/app/outputs/flutter-apk/app-release.apk
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
