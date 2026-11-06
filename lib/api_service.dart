@@ -306,6 +306,79 @@ class ApiService {
     }
   }
 
+  /// Get dynamic payment quote from server
+  static Future<Map<String, dynamic>> getPaymentQuote({
+    required String tier,
+    required int months,
+  }) async {
+    try {
+      final response = await http.get(
+        Uri.parse('$baseUrl/api/payment/quote?tier=${tier.toLowerCase()}&months=$months'),
+        headers: {'User-Agent': userAgent},
+      ).timeout(const Duration(seconds: 8));
+
+      if (response.statusCode == 200) {
+        return jsonDecode(utf8.decode(response.bodyBytes));
+      }
+    } catch (_) {}
+    return {};
+  }
+
+  /// Get dynamic upgrade quote from server (Plus to Pro)
+  static Future<Map<String, dynamic>> getUpgradeQuote(String token) async {
+    try {
+      final response = await http.get(
+        Uri.parse('$baseUrl/api/payment/upgrade/quote?token=${Uri.encodeComponent(token)}'),
+        headers: {'User-Agent': userAgent},
+      ).timeout(const Duration(seconds: 8));
+
+      final data = jsonDecode(utf8.decode(response.bodyBytes));
+      if (response.statusCode == 200) {
+        return data;
+      } else {
+        return {'ok': false, 'detail': data['detail'] ?? 'خطا در محاسبه هزینه ارتقا'};
+      }
+    } catch (e) {
+      return {'ok': false, 'detail': 'خطا در برقراری ارتباط با سرور'};
+    }
+  }
+
+  /// Request upgrade payment (Plus to Pro)
+  static Future<Map<String, dynamic>> requestUpgradePayment({
+    required String token,
+    String source = 'app',
+  }) async {
+    try {
+      final response = await http.post(
+        Uri.parse('$baseUrl/api/payment/upgrade'),
+        headers: {
+          'Content-Type': 'application/json',
+          'User-Agent': userAgent,
+        },
+        body: jsonEncode({
+          'token': token,
+          'source': source,
+        }),
+      ).timeout(const Duration(seconds: 12));
+
+      final data = jsonDecode(utf8.decode(response.bodyBytes));
+      if (response.statusCode == 200 && data['payment_url'] != null) {
+        return {
+          'success': true,
+          'payment_url': data['payment_url'],
+          'track_id': data['track_id'],
+        };
+      } else {
+        return {
+          'success': false,
+          'message': data['detail'] ?? data['message'] ?? 'خطا در ایجاد درخواست ارتقا',
+        };
+      }
+    } catch (e) {
+      return {'success': false, 'message': 'خطا در ارتباط با سرور پرداخت.'};
+    }
+  }
+
   /// Detect Current Public IP from Server
   static Future<String?> detectIp() async {
     try {
@@ -387,8 +460,8 @@ class ApiService {
       }
     } catch (_) {}
     return {
-      'primary_dns': '87.248.145.40',
-      'secondary_dns': '193.242.208.98',
+      'primary_dns': '194.32.214.108',
+      'secondary_dns': '194.32.214.163',
       'update_available': false,
     };
   }

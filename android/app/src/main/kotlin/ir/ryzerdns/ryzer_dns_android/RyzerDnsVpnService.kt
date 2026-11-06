@@ -44,7 +44,7 @@ class RyzerDnsVpnService : VpnService() {
     private val localDnsCache = ConcurrentHashMap<String, Pair<Long, ByteArray>>()
     private var networkCallback: ConnectivityManager.NetworkCallback? = null
 
-    private val targetServerIpBytes = byteArrayOf(87.toByte(), 248.toByte(), 145.toByte(), 40.toByte())
+    private val targetServerIpBytes = byteArrayOf(194.toByte(), 32.toByte(), 214.toByte(), 108.toByte())
     private val targetServerHost = "dns.ryzerdns.ir"
 
     private var dotPool: DoTResolverPool? = null
@@ -60,8 +60,8 @@ class RyzerDnsVpnService : VpnService() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_START -> {
-                val primaryDns = intent.getStringExtra("primary_dns") ?: "87.248.145.40"
-                val secondaryDns = intent.getStringExtra("secondary_dns") ?: "193.242.208.98"
+                val primaryDns = intent.getStringExtra("primary_dns") ?: "194.32.214.108"
+                val secondaryDns = intent.getStringExtra("secondary_dns") ?: "194.32.214.163"
                 val enableDoh = intent.getBooleanExtra("enable_doh", false)
                 startDns(primaryDns, secondaryDns, enableDoh)
             }
@@ -502,7 +502,7 @@ class RyzerDnsVpnService : VpnService() {
             } catch (_: Exception) {
                 arrayOf(
                     InetAddress.getByAddress(targetServerIpBytes),
-                    InetAddress.getByName("193.242.208.98")
+                    InetAddress.getByName("194.32.214.163")
                 )
             }
             val chosenIp = resolvedAddresses[workerIndex % resolvedAddresses.size]

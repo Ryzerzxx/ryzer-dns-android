@@ -432,9 +432,11 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
         }
       }
 
+      final primary = _remoteConfig['primary_dns'] ?? '194.32.214.108';
+      final secondary = _remoteConfig['secondary_dns'] ?? '194.32.214.163';
       final success = await VpnManager.startVpn(
-        primaryDns: '87.248.145.40',
-        secondaryDns: '193.242.208.98',
+        primaryDns: primary,
+        secondaryDns: secondary,
         enableDoh: false,
         dohUrl: 'https://ryzerdns.ir/dns-query',
       );
@@ -1138,6 +1140,105 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
   // ══════════════════════════════════════════════════════════════════════════
   // 💎 TAB 2: PLANS & IN-APP PURCHASE
   // ══════════════════════════════════════════════════════════════════════════
+  Widget _buildUpgradeCard() {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 18),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          colors: [Color(0x33FFAB00), Color(0x14FF3B5C)],
+          begin: Alignment.topRight,
+          end: Alignment.bottomLeft,
+        ),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: const Color(0x80FFAB00), width: 1.2),
+      ),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(9),
+            decoration: BoxDecoration(
+              color: const Color(0x33FFAB00),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: const Icon(Icons.upgrade_rounded, color: Color(0xFFFFAB00), size: 24),
+          ),
+          const SizedBox(width: 14),
+          const Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'ارتقای اشتراک به Ryzer PRO',
+                  style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w900, color: Colors.white),
+                ),
+                SizedBox(height: 3),
+                Text(
+                  'محاسبه مابه‌التفاوت بر اساس روزهای باقی‌مانده',
+                  style: TextStyle(fontSize: 11, color: Color(0xFFFFD54F)),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          ElevatedButton(
+            onPressed: _handleUpgradePlan,
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFFFFAB00),
+              foregroundColor: Colors.black,
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              elevation: 0,
+            ),
+            child: const Text('ارتقا', style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w900)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildProDisabledUpgradeNotice() {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 18),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
+      decoration: BoxDecoration(
+        color: const Color(0xFF0E0E14),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: const Color(0x1AFFFFFF)),
+      ),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: const Color(0x1A00E676),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: const Icon(Icons.verified_rounded, color: Color(0xFF00E676), size: 20),
+          ),
+          const SizedBox(width: 12),
+          const Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'ارتقای اشتراک',
+                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800, color: Colors.white70),
+                ),
+                SizedBox(height: 2),
+                Text(
+                  'اشتراک فعال شما Ryzer PRO است (بالاترین سطح دسترسی)',
+                  style: TextStyle(fontSize: 11, color: Color(0xFF8E8EA8)),
+                ),
+              ],
+            ),
+          ),
+          const Icon(Icons.lock_outline, color: Color(0xFF555566), size: 18),
+        ],
+      ),
+    );
+  }
+
   Widget _buildPlansTab() {
     final proCard = _buildPlanCard(
       tier: 'pro',
@@ -1158,9 +1259,10 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
       tier: 'plus',
       title: _uiConfig['plus_plan_title'] ?? 'پلن PLUS (ویژه گیمینگ)',
       features: (_uiConfig['plus_features'] as List?)?.map((e) => e.toString()).toList() ?? [
-        'اختصاصی بازی‌های آنلاین و استورهای گیمینگ',
+        'طراحی شده برای بازی‌های آنلاین',
         'پینگ بهینه و اتصال پایدار سرورهای بازی',
         'پشتیبانی لانچرهای Steam, Epic Games, EA App, Riot',
+        'شتاب‌دهنده دانلود دیتای بازی‌ها',
       ],
       price1m: _uiConfig['plus_price_1m'] ?? '۸۹,۰۰۰ تومان',
       price3m: _uiConfig['plus_price_3m'] ?? '۲۶۷,۰۰۰ تومان',
@@ -1180,6 +1282,11 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
       }
     }
 
+    final userTier = (_userData?['plan_tier'] ?? '').toString().toLowerCase();
+    final isExpired = _userData?['is_expired'] == true;
+    final isTrial = _userData?['is_trial'] == true;
+    final hasActivePaidSub = _userToken != null && _userData != null && !isExpired && !isTrial;
+
     return ListView(
       physics: const BouncingScrollPhysics(),
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
@@ -1193,7 +1300,12 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
           'کاهش پینگ، رفع تحریم بازی‌ها و حذف پکت‌لاس با گیت‌وی مستقیم',
           style: TextStyle(fontSize: 12, color: Color(0xFFA0A0B0)),
         ),
-        const SizedBox(height: 20),
+        const SizedBox(height: 18),
+        if (hasActivePaidSub && userTier == 'plus') ...[
+          _buildUpgradeCard(),
+        ] else if (hasActivePaidSub && userTier == 'pro') ...[
+          _buildProDisabledUpgradeNotice(),
+        ],
         ...cards,
       ],
     );
@@ -1280,14 +1392,12 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
             SizedBox(
               width: double.infinity,
               child: ElevatedButton.icon(
-                onPressed: () {
-                  _showToast('اشتراک فعال شما PLUS است. جهت ارتقا به پلن پرو، لطفاً از پنل کاربری وب‌سایت گزینه ارتقا به PRO را انتخاب فرمایید.');
-                },
+                onPressed: _handleUpgradePlan,
                 icon: const Icon(Icons.upgrade_rounded, size: 16),
                 label: const Text('ارتقا به پلن PRO (مابه‌التفاوت)', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800)),
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFFFF3B5C),
-                  foregroundColor: Colors.white,
+                  backgroundColor: const Color(0xFFFFAB00),
+                  foregroundColor: Colors.black,
                   padding: const EdgeInsets.symmetric(vertical: 10),
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                 ),
@@ -1372,32 +1482,55 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
           return;
         }
         if (userTier == 'plus' && tier.toLowerCase() == 'pro') {
-          _showToast('اشتراک فعال شما PLUS است. جهت ارتقا به پلن پرو، لطفاً از پنل کاربری وب‌سایت گزینه ارتقا به PRO را انتخاب فرمایید.');
+          _handleUpgradePlan();
           return;
         }
       }
     }
 
-    // Exact official pricing and ZarinPal fees identical to website
-    final Map<String, Map<String, dynamic>> planDetails = {
-      'plus_1': {'base': 89000, 'fee': 945, 'total': 89945, 'dur': '۱ ماهه', 'title': 'Ryzer Plus'},
-      'plus_3': {'base': 267000, 'fee': 1835, 'total': 268835, 'dur': '۳ ماهه', 'title': 'Ryzer Plus'},
-      'pro_1': {'base': 149000, 'fee': 1245, 'total': 150245, 'dur': '۱ ماهه', 'title': 'Ryzer Pro'},
-      'pro_3': {'base': 447000, 'fee': 2735, 'total': 449735, 'dur': '۳ ماهه', 'title': 'Ryzer Pro'},
-    };
+    // Dynamic Server-Driven Pricing and Fee Calculation (matches website)
+    int baseAmount = 0;
+    int feeAmount = 0;
+    int totalAmount = 0;
+    String durText = '$months ماهه';
+    String planTitle = 'Ryzer ${tier.toUpperCase()}';
 
-    final planKey = '${tier.toLowerCase()}_$months';
-    final planInfo = planDetails[planKey] ?? {
-      'base': 0,
-      'fee': 0,
-      'total': 0,
-      'dur': '$months ماهه',
-      'title': 'Ryzer ${tier.toUpperCase()}'
-    };
+    try {
+      final quote = await ApiService.getPaymentQuote(tier: tier, months: months);
+      if (quote['ok'] == true) {
+        baseAmount = (quote['base_amount'] as num?)?.toInt() ?? 0;
+        feeAmount = (quote['fee'] as num?)?.toInt() ?? 0;
+        totalAmount = (quote['total_amount'] as num?)?.toInt() ?? 0;
+        durText = quote['duration_text']?.toString() ?? durText;
+        planTitle = quote['title']?.toString() ?? planTitle;
+      }
+    } catch (_) {}
 
-    final baseFormatted = '${(planInfo['base'] as int).toString().replaceAllMapped(RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (Match m) => '${m[1]},')} تومان';
-    final feeFormatted = '${(planInfo['fee'] as int).toString().replaceAllMapped(RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (Match m) => '${m[1]},')} تومان';
-    final totalFormatted = '${(planInfo['total'] as int).toString().replaceAllMapped(RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (Match m) => '${m[1]},')} تومان';
+    if (baseAmount == 0) {
+      final planKey = '${tier.toLowerCase()}_$months';
+      final dynamic rawDetails = (_uiConfig['plan_details'] as Map?)?[planKey];
+      if (rawDetails is Map) {
+        baseAmount = (rawDetails['base'] as num?)?.toInt() ?? 0;
+        feeAmount = (rawDetails['fee'] as num?)?.toInt() ?? 0;
+        totalAmount = (rawDetails['total'] as num?)?.toInt() ?? 0;
+        durText = rawDetails['dur']?.toString() ?? durText;
+        planTitle = rawDetails['title']?.toString() ?? planTitle;
+      }
+    }
+
+    if (baseAmount == 0) {
+      baseAmount = tier.toLowerCase() == 'pro' ? (months == 1 ? 149000 : 447000) : (months == 1 ? 89000 : 267000);
+      feeAmount = (baseAmount * 0.01).ceil() + 55;
+      totalAmount = baseAmount + feeAmount;
+    }
+
+    String formatToman(num n) {
+      return '${n.toInt().toString().replaceAllMapped(RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (Match m) => '${m[1]},')} تومان';
+    }
+
+    final baseFormatted = formatToman(baseAmount);
+    final feeFormatted = formatToman(feeAmount);
+    final totalFormatted = formatToman(totalAmount);
 
     final confirm = await showDialog<bool>(
       context: context,
@@ -1440,27 +1573,35 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
                       children: [
                         const Text('پلن انتخابی', style: TextStyle(fontSize: 12, color: Color(0xFFA0A0B0))),
                         Text(
-                          '${tier.toUpperCase()} (${planInfo['dur']})',
+                          '$planTitle ($durText)',
                           style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w800, color: Colors.white),
                         ),
                       ],
                     ),
-                    const Divider(color: Color(0x1AFFFFFF), height: 20),
+                    const Divider(color: Color(0x1AFFFFFF), height: 18),
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        const Text('مبلغ اشتراک', style: TextStyle(fontSize: 12, color: Color(0xFFA0A0B0))),
-                        Text(baseFormatted, style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: Colors.white)),
+                        const Text('مبلغ پلن', style: TextStyle(fontSize: 12, color: Color(0xFFA0A0B0))),
+                        Text(baseFormatted, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: Color(0xFFE0E0EC))),
+                      ],
+                    ),
+                    const Divider(color: Color(0x1AFFFFFF), height: 18),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        const Text('کارمزد درگاه پرداخت', style: TextStyle(fontSize: 12, color: Color(0xFFA0A0B0))),
+                        Text(feeFormatted, style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: Color(0xFFA0A0B0))),
                       ],
                     ),
                     const Divider(color: Color(0x33FFFFFF), height: 20),
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        const Text('مبلغ قابل پرداخت', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800, color: Colors.white)),
+                        const Text('مبلغ نهایی قابل پرداخت', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800, color: Colors.white)),
                         Text(
-                          baseFormatted,
-                          style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w900, color: Color(0xFF00E676)),
+                          totalFormatted,
+                          style: const TextStyle(fontSize: 14.5, fontWeight: FontWeight.w900, color: Color(0xFF00E676)),
                         ),
                       ],
                     ),
@@ -1493,16 +1634,17 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
                 ),
                 const SizedBox(width: 12),
                 Expanded(
+                  flex: 2,
                   child: ElevatedButton(
                     onPressed: () => Navigator.pop(ctx, true),
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF00E676),
-                      foregroundColor: Colors.black,
+                      backgroundColor: const Color(0xFFD91B35),
+                      foregroundColor: Colors.white,
                       elevation: 0,
                       padding: const EdgeInsets.symmetric(vertical: 11),
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                     ),
-                    child: const Text('پرداخت', style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w900)),
+                    child: const Text('انتقال به درگاه پرداخت', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w900)),
                   ),
                 ),
               ],
@@ -1543,6 +1685,222 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
       }
     } catch (e) {
       _showToast('خطا در ایجاد درخواست پرداخت.');
+    }
+  }
+
+  Future<void> _handleUpgradePlan() async {
+    if (_userToken == null) {
+      _showAuthModal();
+      return;
+    }
+
+    if (_userData == null) {
+      await _refreshUserProfile();
+    }
+
+    final userTier = (_userData?['plan_tier'] ?? '').toString().toLowerCase();
+    final isExpired = _userData?['is_expired'] == true;
+    final isTrial = _userData?['is_trial'] == true;
+
+    if (userTier == 'pro' && !isExpired && !isTrial) {
+      _showToast('اشتراک فعال شما از قبل PRO است.');
+      return;
+    }
+
+    if (userTier != 'plus' || isExpired || isTrial) {
+      _showToast('امکان ارتقا فقط برای کاربران دارای اشتراک فعال Plus امکان‌پذیر است.');
+      return;
+    }
+
+    _showToast('در حال محاسبه مابه‌التفاوت ارتقا...');
+
+    final quote = await ApiService.getUpgradeQuote(_userToken!);
+    if (quote['ok'] != true) {
+      _showToast(quote['detail']?.toString() ?? 'خطا در محاسبه هزینه ارتقا.');
+      return;
+    }
+
+    final remainingDays = quote['remaining_days'] ?? 0;
+    final baseAmount = (quote['base_amount'] as num?)?.toInt() ?? 0;
+    final feeAmount = (quote['fee'] as num?)?.toInt() ?? 0;
+    final totalAmount = (quote['total_amount'] as num?)?.toInt() ?? 0;
+
+    String formatToman(num n) {
+      return '${n.toInt().toString().replaceAllMapped(RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (Match m) => '${m[1]},')} تومان';
+    }
+
+    final baseFormatted = formatToman(baseAmount);
+    final feeFormatted = formatToman(feeAmount);
+    final totalFormatted = formatToman(totalAmount);
+
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => Directionality(
+        textDirection: TextDirection.rtl,
+        child: AlertDialog(
+          backgroundColor: const Color(0xFF0E0E14),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+            side: const BorderSide(color: Color(0x33FFAB00)),
+          ),
+          title: Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(6),
+                decoration: BoxDecoration(
+                  color: const Color(0x33FFAB00),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: const Icon(Icons.upgrade_rounded, color: Color(0xFFFFAB00), size: 20),
+              ),
+              const SizedBox(width: 8),
+              const Text('پیش‌فاکتور ارتقای اشتراک', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: Colors.white)),
+            ],
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF14141E),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: const Color(0x1AFFFFFF)),
+                ),
+                child: Column(
+                  children: [
+                    const Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text('سرویس / پلن فعلی', style: TextStyle(fontSize: 12, color: Color(0xFFA0A0B0))),
+                        Text('Ryzer Plus', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800, color: Colors.white)),
+                      ],
+                    ),
+                    const Divider(color: Color(0x1AFFFFFF), height: 18),
+                    const Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text('پلن انتخابی مقصد', style: TextStyle(fontSize: 12, color: Color(0xFFA0A0B0))),
+                        Text('Ryzer Pro', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800, color: Color(0xFFFFAB00))),
+                      ],
+                    ),
+                    const Divider(color: Color(0x1AFFFFFF), height: 18),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        const Text('مدت زمان باقی‌مانده', style: TextStyle(fontSize: 12, color: Color(0xFFA0A0B0))),
+                        Text('$remainingDays روز', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: Color(0xFFE0E0EC))),
+                      ],
+                    ),
+                    const Divider(color: Color(0x1AFFFFFF), height: 18),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        const Text('مبلغ مابه‌التفاوت پلن', style: TextStyle(fontSize: 12, color: Color(0xFFA0A0B0))),
+                        Text(baseFormatted, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: Color(0xFFE0E0EC))),
+                      ],
+                    ),
+                    const Divider(color: Color(0x1AFFFFFF), height: 18),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        const Text('کارمزد درگاه پرداخت', style: TextStyle(fontSize: 12, color: Color(0xFFA0A0B0))),
+                        Text(feeFormatted, style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: Color(0xFFA0A0B0))),
+                      ],
+                    ),
+                    const Divider(color: Color(0x33FFFFFF), height: 20),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        const Text('مبلغ نهایی قابل پرداخت', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800, color: Colors.white)),
+                        Text(totalFormatted, style: const TextStyle(fontSize: 14.5, fontWeight: FontWeight.w900, color: Color(0xFF00E676))),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 12),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                decoration: BoxDecoration(
+                  color: const Color(0x0AFFFFFF),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: const Color(0x14FFFFFF)),
+                ),
+                child: const Text(
+                  'این مبلغ بر اساس روز‌های باقی‌مانده شما محاسبه شده است.',
+                  style: TextStyle(fontSize: 11, color: Color(0xFFA0A0B0)),
+                  textAlign: TextAlign.center,
+                ),
+              ),
+            ],
+          ),
+          actionsPadding: const EdgeInsets.fromLTRB(18, 0, 18, 16),
+          actions: [
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton(
+                    onPressed: () => Navigator.pop(ctx, false),
+                    style: OutlinedButton.styleFrom(
+                      side: const BorderSide(color: Color(0x33FFFFFF)),
+                      foregroundColor: Colors.white70,
+                      padding: const EdgeInsets.symmetric(vertical: 11),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    ),
+                    child: const Text('انصراف', style: TextStyle(color: Colors.white70, fontSize: 13, fontWeight: FontWeight.w700)),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  flex: 2,
+                  child: ElevatedButton(
+                    onPressed: () => Navigator.pop(ctx, true),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFFFFAB00),
+                      foregroundColor: Colors.black,
+                      elevation: 0,
+                      padding: const EdgeInsets.symmetric(vertical: 11),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    ),
+                    child: const Text('انتقال به درگاه پرداخت', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w900)),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+
+    if (confirm != true) return;
+
+    try {
+      _showToast('در حال انتقال به درگاه پرداخت...');
+      final res = await ApiService.requestUpgradePayment(
+        token: _userToken!,
+        source: 'app',
+      );
+
+      if (res['success'] == true && res['payment_url'] != null) {
+        final paymentUri = Uri.parse(res['payment_url']);
+        try {
+          final launched = await launchUrl(paymentUri, mode: LaunchMode.externalApplication);
+          if (!launched) {
+            await launchUrl(paymentUri, mode: LaunchMode.platformDefault);
+          }
+        } catch (_) {
+          try {
+            await launchUrl(paymentUri, mode: LaunchMode.platformDefault);
+          } catch (e) {
+            _showToast('امکان باز کردن مرورگر وجود ندارد.');
+          }
+        }
+      } else {
+        _showToast(res['message'] ?? 'خطا در ارتباط با درگاه پرداخت.');
+      }
+    } catch (e) {
+      _showToast('خطا در ایجاد درخواست ارتقا.');
     }
   }
 
@@ -2175,9 +2533,26 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
             icon: Icons.email_outlined,
             title: 'پشتیبانی ایمیل',
             value: _uiConfig['support_label'] ?? 'ارتباط با ما',
-            onTap: () {
-              final email = _uiConfig['support_email'] ?? 'info@ryzerdns.ir';
-              launchUrl(Uri.parse('mailto:$email'), mode: LaunchMode.externalApplication);
+            onTap: () async {
+              final rawEmail = (_uiConfig['support_email'] ?? '').toString().trim();
+              final email = rawEmail.isNotEmpty ? rawEmail : 'info@ryzerdns.ir';
+              final uri = Uri(
+                scheme: 'mailto',
+                path: email,
+                query: 'subject=${Uri.encodeComponent("پشتیبانی RyzerDNS")}',
+              );
+              try {
+                final launched = await launchUrl(uri, mode: LaunchMode.externalApplication);
+                if (!launched) {
+                  await launchUrl(Uri.parse('mailto:$email'), mode: LaunchMode.platformDefault);
+                }
+              } catch (_) {
+                try {
+                  await launchUrl(Uri.parse('mailto:$email'), mode: LaunchMode.platformDefault);
+                } catch (e) {
+                  _showToast('امکان باز کردن برنامه ایمیل در دستگاه شما وجود ندارد.');
+                }
+              }
             },
           ),
         ],
