@@ -266,9 +266,10 @@ class ApiService {
     }
   }
 
-  /// Request Zarinpal Payment URL for Plans (Pro / Plus)
+  /// Request Zarinpal Payment URL for Plans (Pro / Plus / Server-Defined Packages)
   static Future<Map<String, dynamic>> requestPayment({
     required String token,
+    String? packageKey,
     required String planTier,
     required int durationMonths,
     String source = 'app',
@@ -282,6 +283,7 @@ class ApiService {
         },
         body: jsonEncode({
           'token': token,
+          'package_key': (packageKey ?? '').trim(),
           'plan_tier': planTier.toLowerCase(),
           'duration_months': durationMonths,
           'source': source,
@@ -308,17 +310,26 @@ class ApiService {
 
   /// Get dynamic payment quote from server
   static Future<Map<String, dynamic>> getPaymentQuote({
+    String? packageKey,
     required String tier,
     required int months,
   }) async {
     try {
+      final pk = Uri.encodeComponent((packageKey ?? '').trim());
+      final t = Uri.encodeComponent(tier.toLowerCase().trim());
       final response = await http.get(
-        Uri.parse('$baseUrl/api/payment/quote?tier=${tier.toLowerCase()}&months=$months'),
+        Uri.parse('$baseUrl/api/payment/quote?package_key=$pk&tier=$t&months=$months'),
         headers: {'User-Agent': userAgent},
       ).timeout(const Duration(seconds: 8));
 
+      final data = jsonDecode(utf8.decode(response.bodyBytes));
       if (response.statusCode == 200) {
-        return jsonDecode(utf8.decode(response.bodyBytes));
+        return data is Map<String, dynamic> ? data : {};
+      } else {
+        return {
+          'ok': false,
+          'detail': (data is Map ? (data['detail'] ?? data['message']) : null) ?? 'خطا در استعلام قیمت.',
+        };
       }
     } catch (_) {}
     return {};
@@ -445,25 +456,25 @@ class ApiService {
       ).timeout(const Duration(seconds: 5));
     } catch (_) {}
   }
-  static Future<Map<String, dynamic>> getRemoteConfig() async {
+  static Future<Map<String, dynamic>> getRemoteConfig({String currentVersion = '1.2.0'}) async {
     try {
+      final cv = Uri.encodeComponent(currentVersion);
       final response = await http.get(
-        Uri.parse('$baseUrl/api/app/config?channel=$buildChannel'),
+        Uri.parse('$baseUrl/api/app/config?channel=$buildChannel&current_version=$cv'),
         headers: {
           'User-Agent': userAgent,
           'X-App-Channel': buildChannel,
         },
-      ).timeout(const Duration(seconds: 8));
+      ).timeout(const Duration(seconds: 10));
 
       if (response.statusCode == 200) {
-        return jsonDecode(utf8.decode(response.bodyBytes));
+        final decoded = jsonDecode(utf8.decode(response.bodyBytes));
+        if (decoded is Map<String, dynamic>) {
+          return decoded;
+        }
       }
     } catch (_) {}
-    return {
-      'primary_dns': '194.32.214.108',
-      'secondary_dns': '194.32.214.163',
-      'update_available': false,
-    };
+    return {};
   }
 
   /// Authenticate with Google ID Token / Access Token directly from Google Play Services
