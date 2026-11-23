@@ -266,44 +266,31 @@ class ApiService {
     }
   }
 
-  /// Request Zarinpal Payment URL for Plans (Pro / Plus)
-  static Future<Map<String, dynamic>> requestPayment({
-    required String token,
-    required String planTier,
-    required int durationMonths,
-    String source = 'app',
+  /// Get dynamic package quote from server (read-only metadata)
+  static Future<Map<String, dynamic>> getPaymentQuote({
+    String? packageKey,
+    required String tier,
+    required int months,
   }) async {
     try {
-      final response = await http.post(
-        Uri.parse('$baseUrl/api/payment/request'),
-        headers: {
-          'Content-Type': 'application/json',
-          'User-Agent': userAgent,
-        },
-        body: jsonEncode({
-          'token': token,
-          'plan_tier': planTier.toLowerCase(),
-          'duration_months': durationMonths,
-          'source': source,
-        }),
-      ).timeout(const Duration(seconds: 12));
+      final pk = Uri.encodeComponent((packageKey ?? '').trim());
+      final t = Uri.encodeComponent(tier.toLowerCase().trim());
+      final response = await http.get(
+        Uri.parse('$baseUrl/api/payment/quote?package_key=$pk&tier=$t&months=$months'),
+        headers: {'User-Agent': userAgent},
+      ).timeout(const Duration(seconds: 8));
 
       final data = jsonDecode(utf8.decode(response.bodyBytes));
-      if (response.statusCode == 200 && data['payment_url'] != null) {
-        return {
-          'success': true,
-          'payment_url': data['payment_url'],
-          'track_id': data['track_id'],
-        };
+      if (response.statusCode == 200) {
+        return data is Map<String, dynamic> ? data : {};
       } else {
         return {
-          'success': false,
-          'message': data['detail'] ?? data['message'] ?? 'خطا در اتصال به درگاه پرداخت.',
+          'ok': false,
+          'detail': (data is Map ? (data['detail'] ?? data['message']) : null) ?? 'خطا در استعلام مشخصات پلن.',
         };
       }
-    } catch (e) {
-      return {'success': false, 'message': 'خطا در ارتباط با سرور پرداخت.'};
-    }
+    } catch (_) {}
+    return {};
   }
 
   /// Detect Current Public IP from Server
@@ -372,25 +359,25 @@ class ApiService {
       ).timeout(const Duration(seconds: 5));
     } catch (_) {}
   }
-  static Future<Map<String, dynamic>> getRemoteConfig() async {
+  static Future<Map<String, dynamic>> getRemoteConfig({String currentVersion = '1.1.1'}) async {
     try {
+      final cv = Uri.encodeComponent(currentVersion);
       final response = await http.get(
-        Uri.parse('$baseUrl/api/app/config?channel=$buildChannel'),
+        Uri.parse('$baseUrl/api/app/config?channel=$buildChannel&current_version=$cv'),
         headers: {
           'User-Agent': userAgent,
           'X-App-Channel': buildChannel,
         },
-      ).timeout(const Duration(seconds: 8));
+      ).timeout(const Duration(seconds: 10));
 
       if (response.statusCode == 200) {
-        return jsonDecode(utf8.decode(response.bodyBytes));
+        final decoded = jsonDecode(utf8.decode(response.bodyBytes));
+        if (decoded is Map<String, dynamic>) {
+          return decoded;
+        }
       }
     } catch (_) {}
-    return {
-      'primary_dns': '87.248.145.40',
-      'secondary_dns': '193.242.208.98',
-      'update_available': false,
-    };
+    return {};
   }
 
   /// Authenticate with Google ID Token / Access Token directly from Google Play Services
@@ -552,11 +539,15 @@ class ApiService {
     }
   }
 
-  /// Myket Server-side verification
+  /// Myket Server-side verification (cryptographic signature + S2S validation)
   static Future<Map<String, dynamic>> verifyMyketPurchase({
     required String token,
     required String sku,
     required String purchaseToken,
+    String orderId = '',
+    String originalJson = '',
+    String signature = '',
+    String developerPayload = '',
   }) async {
     try {
       final response = await http.post(
@@ -569,10 +560,21 @@ class ApiService {
           'token': token,
           'sku': sku,
           'purchase_token': purchaseToken,
+          'order_id': orderId,
+          'original_json': originalJson,
+          'signature': signature,
+          'developer_payload': developerPayload,
         }),
       ).timeout(const Duration(seconds: 15));
 
-      return jsonDecode(utf8.decode(response.bodyBytes));
+      final data = jsonDecode(utf8.decode(response.bodyBytes));
+      if (response.statusCode == 200 && data is Map<String, dynamic>) {
+        return data;
+      }
+      return {
+        'success': false,
+        'message': (data is Map ? (data['detail'] ?? data['message']) : null) ?? 'خطا در تایید تراکنش مایکت.',
+      };
     } catch (e) {
       return {'success': false, 'message': 'خطا در تایید تراکنش با سرور'};
     }

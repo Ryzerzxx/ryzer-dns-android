@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_sign_in/google_sign_in.dart';
@@ -9,6 +10,7 @@ import 'package:myket_iap/util/iab_result.dart';
 import 'package:myket_iap/util/inventory.dart';
 import 'package:myket_iap/util/purchase.dart';
 import 'api_service.dart';
+import 'storefront_renderer.dart';
 import 'vpn_manager.dart';
 
 void main() {
@@ -59,7 +61,7 @@ class MainScreen extends StatefulWidget {
   State<MainScreen> createState() => _MainScreenState();
 }
 
-class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateMixin {
+class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   bool _isConnected = false;
   bool _isConnecting = false;
   int? _pingMs;
@@ -75,19 +77,36 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
   bool _isDetectingIp = false;
   late AnimationController _pulseController;
   int _currentNavIndex = 0; // 0: Home, 1: Plans, 2: Support, 3: Settings
+  bool _myketIabInitialized = false;
 
   // 🌐 Server-Driven UI & Remote Config State
   Map<String, dynamic> _remoteConfig = {};
-  Map<String, dynamic> get _uiConfig => _remoteConfig['ui_config'] ?? {};
+  bool _isLoadingRemoteConfig = true;
+  DateTime? _lastRemoteConfigFetchAt;
+  Map<String, dynamic> get _uiConfig {
+    final raw = _remoteConfig['ui_config'];
+    return raw is Map<String, dynamic> ? raw : (raw is Map ? Map<String, dynamic>.from(raw) : {});
+  }
+  Map<String, dynamic> get _storefrontConfig {
+    final sfTop = _remoteConfig['storefront'];
+    if (sfTop is Map<String, dynamic>) return sfTop;
+    if (sfTop is Map) return Map<String, dynamic>.from(sfTop);
+    final sfUi = _uiConfig['storefront'];
+    if (sfUi is Map<String, dynamic>) return sfUi;
+    if (sfUi is Map) return Map<String, dynamic>.from(sfUi);
+    return {};
+  }
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _pulseController = AnimationController(
       vsync: this,
       duration: const Duration(seconds: 2),
     )..repeat(reverse: true);
 
+    _loadCachedRemoteConfig();
     _loadStoredSession();
     _fetchRemoteConfig();
     _loadTickets();
@@ -96,22 +115,111 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
 
   static const String _myketRsaKey = "MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQCSFZFMD07zzp9eOG95m3Swifaa9unu21AJqjNVKKc/EuGHa7OWlCymw4ngTIQI4gYN3Je7UNavxl7bM+yUJrQpELAQvvUdEoLjR6Prja3Lk9BMvibgbYEGRHiM9avLSt3kRSIruJntUh3/CeNL9DhL/pZzwxeOURv92zmqenoQMwIDAQAB";
 
-  void _initMyketBilling() async {
+  Future<bool> _ensureMyketIabReady() async {
+    if (_myketIabInitialized) return true;
     try {
-      await MyketIAP.init(rsaKey: _myketRsaKey, enableDebugLogging: false);
+      final res = await MyketIAP.init(rsaKey: _myketRsaKey, enableDebugLogging: false);
+      if (res != null && res.isSuccess()) {
+        _myketIabInitialized = true;
+        return true;
+      }
+    } catch (_) {}
+    return _myketIabInitialized;
+  }
+
+  Future<void> _initMyketBilling() async {
+    final ready = await _ensureMyketIabReady();
+    if (ready) {
+      await _recoverPendingMyketPurchases();
+    }
+  }
+
+  Future<void> _recoverPendingMyketPurchases() async {
+    if (_userToken == null || _userToken!.isEmpty) return;
+    try {
+      final invMap = await MyketIAP.queryInventory(querySkuDetails: false);
+      final Inventory? inv = invMap[MyketIAP.INVENTORY];
+      if (inv == null || inv.mPurchaseMap.isEmpty) return;
+      bool anyActivated = false;
+      for (final purchase in inv.mPurchaseMap.values) {
+        if (purchase.mPurchaseState != 0) continue;
+        final valRes = await ApiService.verifyMyketPurchase(
+          token: _userToken!,
+          sku: purchase.mSku,
+          purchaseToken: purchase.mToken,
+          orderId: purchase.mOrderId,
+          originalJson: purchase.mOriginalJson,
+          signature: purchase.mSignature,
+          developerPayload: purchase.mDeveloperPayload ?? '',
+        );
+        if (valRes['success'] == true) {
+          anyActivated = true;
+          try {
+            await MyketIAP.consume(purchase: purchase);
+          } catch (_) {}
+        }
+      }
+      if (anyActivated && mounted) {
+        await _refreshUserProfile();
+      }
     } catch (_) {}
   }
 
-  Future<void> _fetchRemoteConfig() async {
-    final cfg = await ApiService.getRemoteConfig();
-    if (mounted && cfg.isNotEmpty) {
-      setState(() => _remoteConfig = cfg);
-      _checkAndPromptUpdate(cfg);
+  Future<void> _loadCachedRemoteConfig() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getString('ryzer_cached_remote_config');
+      if (raw != null && raw.isNotEmpty) {
+        final decoded = jsonDecode(raw);
+        if (decoded is Map<String, dynamic> && mounted && _remoteConfig.isEmpty) {
+          setState(() {
+            _remoteConfig = decoded;
+            _isLoadingRemoteConfig = false;
+          });
+        }
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _fetchRemoteConfig({bool checkUpdate = true}) async {
+    if (_remoteConfig.isEmpty && mounted) {
+      setState(() => _isLoadingRemoteConfig = true);
+    }
+    final cfg = await ApiService.getRemoteConfig(currentVersion: '1.1.1');
+    if (mounted) {
+      if (cfg.isNotEmpty) {
+        setState(() {
+          _remoteConfig = cfg;
+          _isLoadingRemoteConfig = false;
+          _lastRemoteConfigFetchAt = DateTime.now();
+        });
+        try {
+          final prefs = await SharedPreferences.getInstance();
+          await prefs.setString('ryzer_cached_remote_config', jsonEncode(cfg));
+        } catch (_) {}
+        if (checkUpdate) {
+          _checkAndPromptUpdate(cfg);
+        }
+      } else {
+        setState(() => _isLoadingRemoteConfig = false);
+      }
+    }
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _fetchRemoteConfig(checkUpdate: false);
+      if (_userToken != null && _userToken!.isNotEmpty) {
+        _refreshUserProfile();
+        _recoverPendingMyketPurchases();
+      }
     }
   }
 
   void _checkAndPromptUpdate(Map<String, dynamic> cfg) {
-    const currentAppVersion = "1.1";
+    if (ApiService.buildChannel != 'direct') return;
+    const currentAppVersion = "1.1.1";
     final latestVersion = cfg['latest_version'] ?? currentAppVersion;
     final isExplicitUpdate = cfg['update_available'] == true;
     final isHigherVersionAvailable = _isVersionLower(currentAppVersion, latestVersion);
@@ -123,7 +231,7 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
       WidgetsBinding.instance.addPostFrameCallback((_) {
         _showUpdateDialog(
           latestVersion: latestVersion,
-          updateUrl: cfg['update_url'] ?? 'https://ryzerdns.ir/static/download/RyzerDNS_v1.apk',
+          updateUrl: cfg['update_url'] ?? 'myket://details?id=ir.ryzerdns.ryzer_dns_android',
           changelog: cfg['changelog'] ?? 'بهبود پایداری شبکه و رفع خطاهای اتصال.',
           isForce: isForceUpdate,
         );
@@ -238,6 +346,10 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    try {
+      MyketIAP.dispose();
+    } catch (_) {}
     _statusTimer?.cancel();
     _pingTimer?.cancel();
     _ipCheckTimer?.cancel();
@@ -256,6 +368,9 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
         // Check & auto-register device IP silently on startup!
         _checkAndAutoRegisterIp(silent: true);
         _loadTickets();
+        if (_myketIabInitialized) {
+          _recoverPendingMyketPurchases();
+        }
       } else {
         _detectCurrentIpOnly();
       }
@@ -400,7 +515,8 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
   Future<void> _refreshPing() async {
     if (_isMeasuringPing) return;
     setState(() => _isMeasuringPing = true);
-    final ping = await VpnManager.measurePing('87.248.145.40');
+    final pingHost = (_remoteConfig['primary_dns'] ?? '194.32.214.108').toString();
+    final ping = await VpnManager.measurePing(pingHost);
     if (mounted) {
       setState(() {
         _pingMs = ping;
@@ -445,9 +561,11 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
         }
       }
 
+      final primary = (_remoteConfig['primary_dns'] ?? '194.32.214.108').toString();
+      final secondary = (_remoteConfig['secondary_dns'] ?? '194.32.214.163').toString();
       final success = await VpnManager.startVpn(
-        primaryDns: '87.248.145.40',
-        secondaryDns: '193.242.208.98',
+        primaryDns: primary,
+        secondaryDns: secondary,
         enableDoh: false,
         dohUrl: 'https://ryzerdns.ir/dns-query',
       );
@@ -1149,220 +1267,90 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
   }
 
   // ══════════════════════════════════════════════════════════════════════════
-  // 💎 TAB 2: PLANS & IN-APP PURCHASE
+  // 💎 TAB 2: PLANS & IN-APP PURCHASE (100% Server-Driven + Myket IAB ONLY)
   // ══════════════════════════════════════════════════════════════════════════
-  Widget _buildPlansTab() {
-    final proCard = _buildPlanCard(
-      tier: 'pro',
-      title: _uiConfig['pro_plan_title'] ?? 'پلن PRO (نامحدود و کامل)',
-      features: (_uiConfig['pro_features'] as List?)?.map((e) => e.toString()).toList() ?? [
-        'دسترسی به کل ۳۰,۰۰۰ دامنه تحریم‌شده بین‌المللی',
-        'پشتیبانی کامل هوش مصنوعی (ChatGPT, Claude, Gemini)',
-        'پشتیبانی کلیه بازی‌های آنلاین و پلتفرم‌های گیمینگ',
-        'پایداری حداکثری و اولویت ترافیکی سرورها',
-        'تک کاربره همزمان (ثبت آی‌پی هوشمند)',
-      ],
-      price1m: _uiConfig['pro_price_1m'] ?? '۱۴۹,۰۰۰ تومان',
-      price3m: _uiConfig['pro_price_3m'] ?? '۴۴۷,۰۰۰ تومان',
-      isPro: true,
-    );
-
-    final plusCard = _buildPlanCard(
-      tier: 'plus',
-      title: _uiConfig['plus_plan_title'] ?? 'پلن PLUS (ویژه گیمینگ)',
-      features: (_uiConfig['plus_features'] as List?)?.map((e) => e.toString()).toList() ?? [
-        'اختصاصی بازی‌های آنلاین و استورهای گیمینگ',
-        'پینگ بهینه و اتصال پایدار سرورهای بازی',
-        'پشتیبانی لانچرهای Steam, Epic Games, EA App, Riot',
-      ],
-      price1m: _uiConfig['plus_price_1m'] ?? '۸۹,۰۰۰ تومان',
-      price3m: _uiConfig['plus_price_3m'] ?? '۲۶۷,۰۰۰ تومان',
-      isPro: false,
-    );
-
-    final order = (_uiConfig['plans_order'] as List?)?.map((e) => e.toString().toLowerCase()).toList() ?? ['pro', 'plus'];
-    final cards = <Widget>[];
-    for (int i = 0; i < order.length; i++) {
-      if (order[i] == 'plus') {
-        cards.add(plusCard);
-      } else {
-        cards.add(proCard);
+  Future<void> _launchExternalUrl(String rawUrl) async {
+    final uri = Uri.tryParse(rawUrl.trim());
+    if (uri == null || uri.scheme.toLowerCase() != 'https' || uri.host.isEmpty) {
+      _showToast('آدرس لینک نامعتبر است.');
+      return;
+    }
+    try {
+      final launched = await launchUrl(uri, mode: LaunchMode.externalApplication);
+      if (!launched) {
+        await launchUrl(uri, mode: LaunchMode.platformDefault);
       }
-      if (i < order.length - 1) {
-        cards.add(const SizedBox(height: 18));
+    } catch (_) {
+      try {
+        await launchUrl(uri, mode: LaunchMode.platformDefault);
+      } catch (e) {
+        _showToast('امکان باز کردن لینک وجود ندارد.');
       }
     }
+  }
 
-    return ListView(
-      physics: const BouncingScrollPhysics(),
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-      children: [
-        const Text(
-          'پلن‌های تجاری و اشتراک RyzerDNS',
-          style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900, color: Colors.white),
-        ),
-        const SizedBox(height: 4),
-        const Text(
-          'کاهش پینگ، رفع تحریم بازی‌ها و حذف پکت‌لاس با گیت‌وی مستقیم',
-          style: TextStyle(fontSize: 12, color: Color(0xFFA0A0B0)),
-        ),
-        const SizedBox(height: 20),
-        ...cards,
-      ],
+  Widget _buildPlansTab() {
+    return StorefrontPlansView(
+      remoteConfig: _remoteConfig,
+      userToken: _userToken,
+      userData: _userData,
+      isLoadingConfig: _isLoadingRemoteConfig,
+      onRefresh: () async {
+        await _fetchRemoteConfig(checkUpdate: false);
+        if (_userToken != null && _userToken!.isNotEmpty) {
+          await _refreshUserProfile();
+          await _recoverPendingMyketPurchases();
+        }
+      },
+      onPurchaseOption: _handlePurchaseOption,
+      onBuyPackageByKey: _handleBuyPackageByKey,
+      onUpgrade: _handleUpgradePlan,
+      onRequireAuth: _showAuthModal,
+      onSwitchTab: (idx) => setState(() => _currentNavIndex = idx),
+      onLaunchUrl: _launchExternalUrl,
+      onShowToast: _showToast,
     );
   }
 
-  Widget _buildPlanCard({
-    required String tier,
-    required String title,
-    required List<String> features,
-    required String price1m,
-    required String price3m,
-    required bool isPro,
-  }) {
-    final borderColor = isPro ? const Color(0xFFFF3B5C) : const Color(0x33FFFFFF);
-    return Container(
-      padding: const EdgeInsets.all(18),
-      decoration: BoxDecoration(
-        color: const Color(0xFF0E0E14),
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: borderColor, width: isPro ? 1.5 : 1),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text(title, style: const TextStyle(fontSize: 14.5, fontWeight: FontWeight.w900, color: Colors.white)),
-              if (isPro)
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFFF3B5C),
-                    borderRadius: BorderRadius.circular(6),
-                  ),
-                  child: Text(_uiConfig['pro_badge_text'] ?? 'پیشنهادی', style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.w800, color: Colors.white)),
-                ),
-            ],
-          ),
-          const SizedBox(height: 14),
-          ...features.map((f) => Padding(
-                padding: const EdgeInsets.only(bottom: 6),
-                child: Row(
-                  children: [
-                    const Icon(Icons.check_circle, size: 14, color: Color(0xFF00E676)),
-                    const SizedBox(width: 8),
-                    Expanded(child: Text(f, style: const TextStyle(fontSize: 12, color: Color(0xFFD0D0E0)))),
-                  ],
-                ),
-              )),
-          const Divider(color: Color(0x1AFFFFFF), height: 24),
-          if (_userToken != null &&
-              _userData != null &&
-              _userData!['is_expired'] != true &&
-              _userData!['is_trial'] != true &&
-              (_userData!['plan_tier'] ?? '').toString().toLowerCase() == 'pro' &&
-              !isPro)
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.symmetric(vertical: 12),
-              decoration: BoxDecoration(
-                color: const Color(0x0AFFFFFF),
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: const Color(0x1AFFFFFF)),
-              ),
-              child: const Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(Icons.block_rounded, size: 14, color: Color(0xFF8E8EA8)),
-                  SizedBox(width: 6),
-                  Text(
-                    'پلن فعال شما Ryzer PRO است (غیرقابل تنزل)',
-                    style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: Color(0xFF8E8EA8)),
-                  ),
-                ],
-              ),
-            )
-          else if (_userToken != null &&
-              _userData != null &&
-              _userData!['is_expired'] != true &&
-              _userData!['is_trial'] != true &&
-              (_userData!['plan_tier'] ?? '').toString().toLowerCase() == 'plus' &&
-              isPro)
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton.icon(
-                onPressed: () {
-                  _showToast('اشتراک فعال شما PLUS است. جهت ارتقا به پلن پرو، لطفاً از پنل کاربری وب‌سایت گزینه ارتقا به PRO را انتخاب فرمایید.');
-                },
-                icon: const Icon(Icons.upgrade_rounded, size: 16),
-                label: const Text('ارتقا به پلن PRO (مابه‌التفاوت)', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800)),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFFFF3B5C),
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(vertical: 10),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                ),
-              ),
-            )
-          else
-            Row(
-              children: [
-                Expanded(
-                  child: OutlinedButton(
-                    onPressed: () => _handlePurchasePlan(tier, 1, price1m),
-                    style: OutlinedButton.styleFrom(
-                      side: const BorderSide(color: Color(0x4DFFFFFF)),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                      padding: const EdgeInsets.symmetric(vertical: 8),
-                    ),
-                    child: Column(
-                      children: [
-                        Text(
-                          (_userToken != null && _userData != null && _userData!['is_expired'] != true && _userData!['is_trial'] != true)
-                              ? 'تمدید ۱ ماهه'
-                              : '۱ ماهه',
-                          style: const TextStyle(fontSize: 11, color: Color(0xFFA0A0B0)),
-                        ),
-                        const SizedBox(height: 2),
-                        Text(price1m, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w800, color: Colors.white)),
-                      ],
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: ElevatedButton(
-                    onPressed: () => _handlePurchasePlan(tier, 3, price3m),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: isPro ? const Color(0xFFFF3B5C) : const Color(0x33FFFFFF),
-                      foregroundColor: Colors.white,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                      padding: const EdgeInsets.symmetric(vertical: 8),
-                      elevation: 0,
-                    ),
-                    child: Column(
-                      children: [
-                        Text(
-                          (_userToken != null && _userData != null && _userData!['is_expired'] != true && _userData!['is_trial'] != true)
-                              ? 'تمدید ۳ ماهه'
-                              : '۳ ماهه',
-                          style: const TextStyle(fontSize: 11, color: Colors.white70)),
-                        const SizedBox(height: 2),
-                        Text(price3m, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w800, color: Colors.white)),
-                      ],
-                    ),
-                  ),
-                ),
-              ],
-            ),
-        ],
-      ),
-    );
+  Map<String, dynamic>? _findOptionInBlocks(List<dynamic> blocks, String packageKey) {
+    for (final raw in blocks) {
+      if (raw is! Map) continue;
+      final b = Map<String, dynamic>.from(raw);
+      if (b['type'] == 'plan' && b['options'] is List) {
+        for (final rawOpt in (b['options'] as List)) {
+          if (rawOpt is! Map) continue;
+          final o = Map<String, dynamic>.from(rawOpt);
+          if ((o['package_key'] ?? '').toString().trim().toLowerCase() == packageKey.toLowerCase()) {
+            return {'option': o, 'block': b};
+          }
+        }
+      } else if (b['type'] == 'grid_row' && b['columns'] is List) {
+        final found = _findOptionInBlocks(b['columns'] as List, packageKey);
+        if (found != null) return found;
+      }
+    }
+    return null;
   }
 
-  Future<void> _handlePurchasePlan(String tier, int months, String priceText) async {
+  Future<void> _handleBuyPackageByKey(String packageKey) async {
+    final blocks = _storefrontConfig['blocks'];
+    if (blocks is List) {
+      final found = _findOptionInBlocks(blocks, packageKey);
+      if (found != null) {
+        await _handlePurchaseOption(
+          found['option'] as Map<String, dynamic>,
+          found['block'] as Map<String, dynamic>,
+        );
+        return;
+      }
+    }
+    await _handlePurchaseOption({'package_key': packageKey}, {'tier': 'pro', 'access_tier': 'pro'});
+  }
+
+  Future<void> _handlePurchaseOption(
+    Map<String, dynamic> option,
+    Map<String, dynamic> planBlock,
+  ) async {
     if (_userToken == null) {
       _showAuthModal();
       return;
@@ -1372,170 +1360,160 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
       await _refreshUserProfile();
     }
 
-    // Enforce Subscription Business Logic:
+    final months = (option['months'] as num?)?.toInt() ?? 1;
+    final tier = (planBlock['tier'] ?? option['tier'] ?? 'pro').toString().trim().toLowerCase();
+    final accessTier = (option['access_tier'] ?? planBlock['access_tier'] ?? (tier == 'plus' ? 'plus' : 'pro')).toString().trim().toLowerCase();
+    final rawPkgKey = (option['package_key'] ?? '').toString().trim();
+    final sku = rawPkgKey.isNotEmpty ? rawPkgKey : '${tier}_${months}m';
+    final allowDowngrade = option['allow_downgrade'] == true;
+    final requireUpgradeFromPlus = option['require_upgrade_from_plus'] != false;
+
     if (_userData != null) {
       final userTier = (_userData!['plan_tier'] ?? '').toString().toLowerCase();
       final isExpired = _userData!['is_expired'] == true;
       final isTrial = _userData!['is_trial'] == true;
 
-      // If user has active PRO and is NOT in a 6-hour trial, block buying Plus
       if (!isExpired && !isTrial) {
-        if (userTier == 'pro' && tier.toLowerCase() == 'plus') {
+        if (userTier == 'pro' && accessTier == 'plus' && !allowDowngrade) {
           _showToast('اشتراک فعال شما PRO است و امکان تمدید یا تغییر به پلن پایین‌تر (Plus) وجود ندارد.');
           return;
         }
-        if (userTier == 'plus' && tier.toLowerCase() == 'pro') {
-          _showToast('اشتراک فعال شما PLUS است. جهت ارتقا به پلن پرو، لطفاً از پنل کاربری وب‌سایت گزینه ارتقا به PRO را انتخاب فرمایید.');
+        final upForTiers = (planBlock['upgrade_for_tiers'] is List)
+            ? (planBlock['upgrade_for_tiers'] as List).map((e) => e.toString().trim().toLowerCase()).toList()
+            : <String>[];
+        if (userTier == 'plus' && upForTiers.contains('plus') && requireUpgradeFromPlus) {
+          await _handleUpgradePlan();
           return;
         }
       }
     }
 
-    // Exact official pricing and ZarinPal fees identical to website
-    final Map<String, Map<String, dynamic>> planDetails = {
-      'plus_1': {'base': 89000, 'fee': 945, 'total': 89945, 'dur': '۱ ماهه', 'title': 'Ryzer Plus'},
-      'plus_3': {'base': 267000, 'fee': 1835, 'total': 268835, 'dur': '۳ ماهه', 'title': 'Ryzer Plus'},
-      'pro_1': {'base': 149000, 'fee': 1245, 'total': 150245, 'dur': '۱ ماهه', 'title': 'Ryzer Pro'},
-      'pro_3': {'base': 447000, 'fee': 2735, 'total': 449735, 'dur': '۳ ماهه', 'title': 'Ryzer Pro'},
-    };
+    int baseAmount = 0;
+    String durText = (option['duration_text'] ?? option['label'] ?? '$months ماهه').toString();
+    String planTitle = (option['short_title'] ?? planBlock['short_title'] ?? 'Ryzer ${tier.toUpperCase()}').toString();
 
-    final planKey = '${tier.toLowerCase()}_$months';
-    final planInfo = planDetails[planKey] ?? {
-      'base': 0,
-      'fee': 0,
-      'total': 0,
-      'dur': '$months ماهه',
-      'title': 'Ryzer ${tier.toUpperCase()}'
-    };
+    final quote = await ApiService.getPaymentQuote(
+      packageKey: sku,
+      tier: tier,
+      months: months,
+    );
+    if (quote['ok'] == true) {
+      baseAmount = (quote['base_amount'] as num?)?.toInt() ?? 0;
+      durText = quote['duration_text']?.toString() ?? durText;
+      planTitle = quote['title']?.toString() ?? planTitle;
+    } else if (quote.isEmpty && (option['price'] as num?) != null && (option['price'] as num) > 0) {
+      baseAmount = (option['price'] as num).toInt();
+    } else {
+      _showToast(quote['detail']?.toString() ?? 'خطا در استعلام مشخصات پلن از سرور.');
+      return;
+    }
 
-    final baseFormatted = '${(planInfo['base'] as int).toString().replaceAllMapped(RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (Match m) => '${m[1]},')} تومان';
-    final feeFormatted = '${(planInfo['fee'] as int).toString().replaceAllMapped(RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (Match m) => '${m[1]},')} تومان';
-    final totalFormatted = '${(planInfo['total'] as int).toString().replaceAllMapped(RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (Match m) => '${m[1]},')} تومان';
+    final baseFormatted = formatTomanComma(baseAmount);
+    final rawPre = _storefrontConfig['pre_invoice'];
+    final preCfg = rawPre is Map<String, dynamic>
+        ? Map<String, dynamic>.from(rawPre)
+        : (rawPre is Map ? Map<String, dynamic>.from(rawPre) : <String, dynamic>{});
+    preCfg['show_fee_row'] = false;
 
-    final confirm = await showDialog<bool>(
+    if (!mounted) return;
+    final confirm = await showServerPreInvoiceDialog(
       context: context,
-      builder: (ctx) => Directionality(
-        textDirection: TextDirection.rtl,
-        child: AlertDialog(
-          backgroundColor: const Color(0xFF0E0E14),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16),
-            side: const BorderSide(color: Color(0x33FFFFFF)),
-          ),
-          title: Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.all(6),
-                decoration: BoxDecoration(
-                  color: const Color(0x1AFF3B5C),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: const Icon(Icons.receipt_long_rounded, color: Color(0xFFFF3B5C), size: 18),
-              ),
-              const SizedBox(width: 8),
-              const Text('پیش‌فاکتور خرید اشتراک', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: Colors.white)),
-            ],
-          ),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                padding: const EdgeInsets.all(14),
-                decoration: BoxDecoration(
-                  color: const Color(0xFF14141E),
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: const Color(0x1AFFFFFF)),
-                ),
-                child: Column(
-                  children: [
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        const Text('پلن انتخابی', style: TextStyle(fontSize: 12, color: Color(0xFFA0A0B0))),
-                        Text(
-                          '${tier.toUpperCase()} (${planInfo['dur']})',
-                          style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w800, color: Colors.white),
-                        ),
-                      ],
-                    ),
-                    const Divider(color: Color(0x1AFFFFFF), height: 20),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        const Text('مبلغ اشتراک', style: TextStyle(fontSize: 12, color: Color(0xFFA0A0B0))),
-                        Text(baseFormatted, style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: Colors.white)),
-                      ],
-                    ),
-                    const Divider(color: Color(0x33FFFFFF), height: 20),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        const Text('مبلغ قابل پرداخت', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800, color: Colors.white)),
-                        Text(
-                          baseFormatted,
-                          style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w900, color: Color(0xFF00E676)),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 12),
-              const Text(
-                'پرداخت امن از طریق مایکت انجام می‌شود و اشتراک بلافاصله فعال می‌گردد.',
-                style: TextStyle(fontSize: 11, color: Color(0xFFA0A0B0), height: 1.5),
-                textAlign: TextAlign.center,
-              ),
-            ],
-          ),
-          actionsPadding: const EdgeInsets.fromLTRB(18, 0, 18, 16),
-          actions: [
-            Row(
-              children: [
-                Expanded(
-                  child: OutlinedButton(
-                    onPressed: () => Navigator.pop(ctx, false),
-                    style: OutlinedButton.styleFrom(
-                      side: const BorderSide(color: Color(0x33FFFFFF)),
-                      foregroundColor: Colors.white70,
-                      padding: const EdgeInsets.symmetric(vertical: 11),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                    ),
-                    child: const Text('انصراف', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700)),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: ElevatedButton(
-                    onPressed: () => Navigator.pop(ctx, true),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF00E676),
-                      foregroundColor: Colors.black,
-                      elevation: 0,
-                      padding: const EdgeInsets.symmetric(vertical: 11),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                    ),
-                    child: const Text('پرداخت', style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w900)),
-                  ),
-                ),
-              ],
-            ),
-          ],
-        ),
-      ),
+      preCfg: preCfg,
+      planDisplayTitle: '$planTitle ($durText)',
+      baseFormatted: baseFormatted,
+      feeFormatted: '۰ تومان',
+      totalFormatted: baseFormatted,
     );
 
     if (confirm != true) return;
 
-    // 🛍️ Myket In-App Billing ONLY (Official Myket IAB SDK)
-    final sku = '${tier.toLowerCase()}_${months}m';
-    try {
-      _showToast('در حال اتصال به مایکت...');
+    await _launchMyketIabPurchase(
+      sku: sku,
+      connectingToast: (preCfg['redirecting_toast'] ?? 'در حال اتصال به مایکت...').toString(),
+    );
+  }
 
-      // Ensure billing client is initialized with official RSA key
-      try {
-        await MyketIAP.init(rsaKey: _myketRsaKey, enableDebugLogging: false);
-      } catch (_) {}
+  Future<void> _handleUpgradePlan() async {
+    if (_userToken == null) {
+      _showAuthModal();
+      return;
+    }
+
+    if (_userData == null) {
+      await _refreshUserProfile();
+    }
+
+    final userTier = (_userData?['plan_tier'] ?? '').toString().toLowerCase();
+    final isExpired = _userData?['is_expired'] == true;
+    final isTrial = _userData?['is_trial'] == true;
+
+    if (userTier == 'pro' && !isExpired && !isTrial) {
+      _showToast('اشتراک فعال شما از قبل PRO است.');
+      return;
+    }
+
+    final rawUpCfg = _storefrontConfig['upgrade_config'];
+    final upCfg = rawUpCfg is Map<String, dynamic>
+        ? rawUpCfg
+        : (rawUpCfg is Map ? Map<String, dynamic>.from(rawUpCfg) : <String, dynamic>{});
+    final fromTiers = (upCfg['from_tiers'] is List)
+        ? (upCfg['from_tiers'] as List).map((e) => e.toString().trim().toLowerCase()).toList()
+        : <String>['plus'];
+
+    if (!fromTiers.contains(userTier) || isExpired || isTrial) {
+      _showToast('امکان ارتقا فقط برای کاربران دارای اشتراک فعال Plus امکان‌پذیر است.');
+      return;
+    }
+
+    final myketUpgradeSku = (upCfg['myket_upgrade_sku'] ?? '').toString().trim();
+    final myketUpgradePrice = (upCfg['myket_upgrade_price'] as num?)?.toInt() ?? 0;
+
+    if (myketUpgradeSku.isEmpty || myketUpgradePrice <= 0) {
+      _showToast('برای تغییر به PRO می‌توانید یکی از پکیج‌های پلن PRO را مستقیماً از طریق مایکت خریداری فرمایید.');
+      return;
+    }
+
+    final rawUpi = _storefrontConfig['upgrade_invoice'];
+    final upiCfg = rawUpi is Map<String, dynamic>
+        ? Map<String, dynamic>.from(rawUpi)
+        : (rawUpi is Map ? Map<String, dynamic>.from(rawUpi) : <String, dynamic>{});
+    upiCfg['show_fee_row'] = false;
+
+    final fromTitle = (upCfg['from_title'] ?? 'Ryzer Plus').toString();
+    final toTitle = (upCfg['to_title'] ?? 'Ryzer Pro').toString();
+
+    if (!mounted) return;
+    final confirm = await showServerUpgradeInvoiceDialog(
+      context: context,
+      upiCfg: upiCfg,
+      fromPlan: fromTitle,
+      toPlan: toTitle,
+      remainingDays: 0,
+      baseFormatted: formatTomanComma(myketUpgradePrice),
+      feeFormatted: '۰ تومان',
+      totalFormatted: formatTomanComma(myketUpgradePrice),
+    );
+
+    if (confirm != true) return;
+
+    await _launchMyketIabPurchase(
+      sku: myketUpgradeSku,
+      connectingToast: (upiCfg['redirecting_toast'] ?? 'در حال اتصال به مایکت...').toString(),
+    );
+  }
+
+  Future<void> _launchMyketIabPurchase({
+    required String sku,
+    required String connectingToast,
+  }) async {
+    try {
+      _showToast(connectingToast);
+
+      final ready = await _ensureMyketIabReady();
+      if (!ready) {
+        _showToast('اتصال به سرویس پرداخت مایکت برقرار نشد. لطفاً از نصب و به‌روزرسانی برنامه مایکت مطمئن شوید.');
+        return;
+      }
 
       final dynamic buyRes = await MyketIAP.launchPurchaseFlow(
         sku: sku,
@@ -1546,49 +1524,75 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
       final Purchase? purchase = buyRes[MyketIAP.PURCHASE];
 
       if (iabResult != null && iabResult.isSuccess() && purchase != null) {
-        final purchaseToken = purchase.mToken;
-        _showToast('تراکنش با موفقیت انجام شد، در حال ثبت اشتراک...');
+        _showToast('تراکنش با موفقیت انجام شد، در حال تایید و فعال‌سازی اشتراک...');
 
-        // Auto-consume consumable purchase so it can be renewed/repurchased
-        try {
-          await MyketIAP.consume(purchase: purchase);
-        } catch (_) {}
-
+        // 1. Verify on RyzerDNS Server BEFORE consuming (so failed network won't lose paid purchase)
         final valRes = await ApiService.verifyMyketPurchase(
           token: _userToken!,
           sku: sku,
-          purchaseToken: purchaseToken,
+          purchaseToken: purchase.mToken,
+          orderId: purchase.mOrderId,
+          originalJson: purchase.mOriginalJson,
+          signature: purchase.mSignature,
+          developerPayload: purchase.mDeveloperPayload ?? '',
         );
+
         if (valRes['success'] == true) {
+          // 2. Consume consumable SKU AFTER server confirms activation
+          try {
+            await MyketIAP.consume(purchase: purchase);
+          } catch (_) {}
+
           _showToast('اشتراک شما با موفقیت فعال شد!');
-          _refreshUserProfile();
-          setState(() {
-            _currentNavIndex = 0; // Return to Home
-          });
+          await _refreshUserProfile();
+          if (mounted) {
+            setState(() => _currentNavIndex = 0);
+          }
         } else {
-          _showToast(valRes['message'] ?? 'خطا در تایید اشتراک مایکت');
-          return;
+          _showToast(valRes['message'] ?? 'خطا در تایید اشتراک مایکت. لطفاً چند لحظه بعد دوباره بررسی کنید.');
         }
       } else {
-        if (iabResult != null && iabResult.mResponse == 1) { // USER_CANCELED
+        final code = iabResult?.mResponse ?? -999;
+        if (code == 1) {
           _showToast('پرداخت توسط شما لغو شد.');
-        } else if (iabResult != null && iabResult.mResponse == 7) { // ITEM_ALREADY_OWNED
-          _showToast('اشتراک قبلی شناسایی شد. در حال مصرف و بازیابی...');
+        } else if (code == 7) {
+          // ITEM_ALREADY_OWNED: verify unconsumed purchase with server first, then consume!
+          _showToast('خرید قبلی تکمیل‌نشده شناسایی شد، در حال بررسی...');
           try {
             final invMap = await MyketIAP.queryInventory(querySkuDetails: false);
             final Inventory? inv = invMap[MyketIAP.INVENTORY];
             final owned = inv?.mPurchaseMap[sku];
             if (owned != null) {
-              await MyketIAP.consume(purchase: owned);
-              _showToast('لطفاً مجدداً دکمه پرداخت را لمس فرمایید.');
+              final valRes = await ApiService.verifyMyketPurchase(
+                token: _userToken!,
+                sku: sku,
+                purchaseToken: owned.mToken,
+                orderId: owned.mOrderId,
+                originalJson: owned.mOriginalJson,
+                signature: owned.mSignature,
+                developerPayload: owned.mDeveloperPayload ?? '',
+              );
+              if (valRes['success'] == true) {
+                try {
+                  await MyketIAP.consume(purchase: owned);
+                } catch (_) {}
+                _showToast('اشتراک شما فعال شد و امکان خرید مجدد باز گردید.');
+                await _refreshUserProfile();
+              } else {
+                _showToast(valRes['message'] ?? 'خطا در بازیابی خرید قبلی مایکت.');
+              }
             }
-          } catch (_) {}
+          } catch (_) {
+            _showToast('خطا در بازیابی خرید قبلی از مایکت.');
+          }
+        } else if (code == -1003) {
+          _showToast('خطا در تایید امضای امنیتی مایکت. لطفاً برنامه مایکت را به‌روزرسانی کنید.');
         } else {
           _showToast(iabResult?.mMessage ?? 'پرداخت انجام نشد.');
         }
       }
     } catch (e) {
-      _showToast('خطا در اجرای فرآیند خرید مایکت.');
+      _showToast('خطا در اجرای فرآیند خرید مایکت. لطفاً نصب بودن مایکت را بررسی فرمایید.');
     }
   }
 
@@ -2221,9 +2225,26 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
             icon: Icons.email_outlined,
             title: 'پشتیبانی ایمیل',
             value: _uiConfig['support_label'] ?? 'ارتباط با ما',
-            onTap: () {
-              final email = _uiConfig['support_email'] ?? 'info@ryzerdns.ir';
-              launchUrl(Uri.parse('mailto:$email'), mode: LaunchMode.externalApplication);
+            onTap: () async {
+              final rawEmail = (_uiConfig['support_email'] ?? '').toString().trim();
+              final email = rawEmail.isNotEmpty ? rawEmail : 'info@ryzerdns.ir';
+              final uri = Uri(
+                scheme: 'mailto',
+                path: email,
+                query: 'subject=${Uri.encodeComponent("پشتیبانی RyzerDNS")}',
+              );
+              try {
+                final launched = await launchUrl(uri, mode: LaunchMode.externalApplication);
+                if (!launched) {
+                  await launchUrl(Uri.parse('mailto:$email'), mode: LaunchMode.platformDefault);
+                }
+              } catch (_) {
+                try {
+                  await launchUrl(Uri.parse('mailto:$email'), mode: LaunchMode.platformDefault);
+                } catch (e) {
+                  _showToast('امکان باز کردن برنامه ایمیل در دستگاه شما وجود ندارد.');
+                }
+              }
             },
           ),
         ],
@@ -2240,7 +2261,7 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
         const SizedBox(height: 18),
         const Center(
           child: Text(
-            'RyzerDNS Client • نسخه v1.1',
+            'RyzerDNS Client • نسخه v1.1.1',
             style: TextStyle(fontSize: 11.5, color: Colors.white38, fontWeight: FontWeight.w600),
           ),
         ),
@@ -2504,7 +2525,16 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
         currentIndex: _currentNavIndex,
         onTap: (idx) {
           setState(() => _currentNavIndex = idx);
-          if (idx == 2) {
+          if (idx == 1) {
+            final stale = _lastRemoteConfigFetchAt == null ||
+                DateTime.now().difference(_lastRemoteConfigFetchAt!).inSeconds >= 8;
+            if (stale) {
+              _fetchRemoteConfig(checkUpdate: false);
+              if (_userToken != null && _userToken!.isNotEmpty) {
+                _refreshUserProfile();
+              }
+            }
+          } else if (idx == 2) {
             _loadTickets();
           }
         },
