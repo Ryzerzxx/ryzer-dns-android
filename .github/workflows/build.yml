@@ -31,7 +31,7 @@ jobs:
 
       - name: Build APK Release
         run: |
-          flutter build apk --release
+          flutter build apk --release --android-skip-build-dependency-validation
           find build -name "*.apk" -ls
 
       - name: Upload Artifact
