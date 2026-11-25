@@ -230,6 +230,10 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
       }
       if (anyActivated && mounted) {
         await _refreshUserProfile();
+        final recMsg = _storefrontMessages['myket_recovery_activated'];
+        if (recMsg != null && recMsg.toString().trim().isNotEmpty) {
+          await _showStorefrontFeedbackKey('myket_recovery_activated');
+        }
       }
     } catch (_) {}
   }
@@ -881,35 +885,48 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
 
   Widget _buildSubscriptionCard() {
     final sc = _subscriptionCardCfg;
-    final cardBg = parseHexColor(sc['card_bg_color'], const Color(0xFF0E0E14));
+    final cardBg = parseHexColor(sc['bg_color'] ?? sc['card_bg_color'], const Color(0xFF0E0E14));
+    final cardRadius = (sc['border_radius'] as num?)?.toDouble() ?? 14.0;
+    final padH = (sc['padding_h'] as num?)?.toDouble() ?? 18.0;
+    final padV = (sc['padding_v'] as num?)?.toDouble() ?? 18.0;
 
     if (_userToken == null) {
       final guestText = (sc['guest_text'] ?? 'جهت استفاده از خدمات هوشمند، وارد حساب خود شوید.').toString();
+      final guestTextColor = parseHexColor(sc['guest_text_color'], const Color(0xFFA0A0B0));
+      final guestTextSize = (sc['guest_text_size'] as num?)?.toDouble() ?? 13.0;
       final guestBtnText = (sc['guest_btn_text'] ?? 'ورود سریع یا ایجاد حساب').toString();
-      final guestBorder = parseHexColor(sc['guest_border_color'], const Color(0x1AFFFFFF));
+      final guestBorder = parseHexColor(sc['guest_border_color'], const Color(0x33FF3B5C));
+      final guestBtnIcon = (sc['guest_btn_icon'] ?? 'login').toString();
+      final guestBtnBg = parseHexColor(sc['guest_btn_bg_color'], Colors.transparent);
+      final guestBtnTextCol = parseHexColor(sc['guest_btn_text_color'], Colors.white);
+      final guestBtnBorderCol = parseHexColor(sc['guest_btn_border_color'], const Color(0xFFFF3B5C));
+      final guestBtnRadius = (sc['guest_btn_radius'] as num?)?.toDouble() ?? 8.0;
       return Container(
         width: double.infinity,
-        padding: const EdgeInsets.all(18),
+        padding: EdgeInsets.symmetric(horizontal: padH, vertical: padV),
         decoration: BoxDecoration(
           color: cardBg,
-          borderRadius: BorderRadius.circular(14),
+          borderRadius: BorderRadius.circular(cardRadius),
           border: Border.all(color: guestBorder),
         ),
         child: Column(
           children: [
             Text(
               guestText,
-              style: const TextStyle(fontSize: 13, color: Color(0xFFA0A0B0)),
+              style: TextStyle(fontSize: guestTextSize, color: guestTextColor),
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: 12),
             OutlinedButton.icon(
               onPressed: _showAuthModal,
-              icon: const Icon(Icons.login, size: 16, color: Color(0xFFFF3B5C)),
-              label: Text(guestBtnText, style: const TextStyle(color: Colors.white, fontSize: 12.5, fontWeight: FontWeight.w700)),
+              icon: guestBtnIcon.isNotEmpty
+                  ? Icon(resolveStorefrontIcon(guestBtnIcon), size: 16, color: guestBtnBorderCol)
+                  : const SizedBox.shrink(),
+              label: Text(guestBtnText, style: TextStyle(color: guestBtnTextCol, fontSize: 12.5, fontWeight: FontWeight.w700)),
               style: OutlinedButton.styleFrom(
-                side: const BorderSide(color: Color(0xFFFF3B5C)),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                backgroundColor: guestBtnBg,
+                side: BorderSide(color: guestBtnBorderCol),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(guestBtnRadius)),
               ),
             ),
           ],
@@ -963,14 +980,26 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
     final expiredBorder = parseHexColor(sc['expired_border_color'], const Color(0x4DFF3B5C));
     final activeColor = parseHexColor(sc['active_accent_color'], const Color(0xFF00E676));
     final expiredColor = parseHexColor(sc['expired_accent_color'], const Color(0xFFFF3B5C));
+    final showBadge = sc['show_tier_badge'] != false;
     final badgePrefix = (sc['tier_badge_prefix'] ?? '').toString();
+    final badgeFontSize = (sc['badge_font_size'] as num?)?.toDouble() ?? 11.0;
+    final titleColor = parseHexColor(sc['title_color'], Colors.white);
+    final titleSize = (sc['title_size'] as num?)?.toDouble() ?? 13.0;
+    final subColor = parseHexColor(sc['subtitle_color'], const Color(0xFFA0A0B0));
+    final expSubColor = parseHexColor(sc['expired_subtitle_color'], expiredColor);
+    final subSize = (sc['subtitle_size'] as num?)?.toDouble() ?? 12.0;
+    final showBtn = sc['show_btn'] != false && btnText.trim().isNotEmpty;
+    final btnRadius = (sc['btn_border_radius'] as num?)?.toDouble() ?? 8.0;
+    final btnPadH = (sc['btn_padding_h'] as num?)?.toDouble() ?? 12.0;
+    final btnPadV = (sc['btn_padding_v'] as num?)?.toDouble() ?? 8.0;
+    final btnFontSize = (sc['btn_font_size'] as num?)?.toDouble() ?? 12.0;
 
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.all(18),
+      padding: EdgeInsets.symmetric(horizontal: padH, vertical: padV),
       decoration: BoxDecoration(
         color: cardBg,
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(cardRadius),
         border: Border.all(color: isExpired ? expiredBorder : activeBorder),
       ),
       child: Row(
@@ -982,29 +1011,31 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
               children: [
                 Row(
                   children: [
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                      decoration: BoxDecoration(
-                        color: (isExpired ? expiredColor : activeColor).withOpacity(0.10),
-                        borderRadius: BorderRadius.circular(6),
-                        border: Border.all(color: isExpired ? expiredColor : activeColor),
-                      ),
-                      child: Text(
-                        '$badgePrefix$tierBadgeText',
-                        style: TextStyle(
-                          fontFamily: 'Syne',
-                          fontSize: 11,
-                          fontWeight: FontWeight.w800,
-                          color: isExpired ? expiredColor : activeColor,
+                    if (showBadge) ...[
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                        decoration: BoxDecoration(
+                          color: (isExpired ? expiredColor : activeColor).withOpacity(0.10),
+                          borderRadius: BorderRadius.circular(6),
+                          border: Border.all(color: isExpired ? expiredColor : activeColor),
+                        ),
+                        child: Text(
+                          '$badgePrefix$tierBadgeText',
+                          style: TextStyle(
+                            fontFamily: 'Syne',
+                            fontSize: badgeFontSize,
+                            fontWeight: FontWeight.w800,
+                            color: isExpired ? expiredColor : activeColor,
+                          ),
                         ),
                       ),
-                    ),
-                    const SizedBox(width: 8),
+                      const SizedBox(width: 8),
+                    ],
                     Flexible(
                       child: Text(
                         statusTitle,
                         overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: Colors.white),
+                        style: TextStyle(fontSize: titleSize, fontWeight: FontWeight.w700, color: titleColor),
                       ),
                     ),
                   ],
@@ -1013,37 +1044,44 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
                 Text(
                   subtitleText,
                   style: TextStyle(
-                    fontSize: 12,
+                    fontSize: subSize,
                     fontWeight: FontWeight.w600,
-                    color: isExpired ? expiredColor : const Color(0xFFA0A0B0),
+                    color: isExpired ? expSubColor : subColor,
                   ),
                 ),
               ],
             ),
           ),
-          const SizedBox(width: 10),
-          ElevatedButton(
-            onPressed: () {
-              final tapFbRaw = sc['btn_tap_feedback'];
-              if (tapFbRaw != null && tapFbRaw.toString().trim().isNotEmpty) {
-                _showStorefrontFeedbackKey('sub_card_btn', overrideRaw: tapFbRaw);
-                return;
-              }
-              setState(() => _currentNavIndex = 1);
-            },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: parseHexColor(sc['btn_bg_color'], const Color(0x1AFF3B5C)),
-              foregroundColor: parseHexColor(sc['btn_text_color'], const Color(0xFFFF3B5C)),
-              side: BorderSide(color: parseHexColor(sc['btn_border_color'], const Color(0xFFFF3B5C))),
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-              elevation: 0,
+          if (showBtn) ...[
+            const SizedBox(width: 10),
+            ElevatedButton(
+              onPressed: () {
+                final tapFbRaw = sc['btn_tap_feedback'];
+                if (tapFbRaw != null && tapFbRaw.toString().trim().isNotEmpty) {
+                  _showStorefrontFeedbackKey('sub_card_btn', overrideRaw: tapFbRaw);
+                  return;
+                }
+                final rawAct = sc['btn_action'];
+                if (rawAct is Map && rawAct.isNotEmpty) {
+                  _dispatchStorefrontAction(Map<String, dynamic>.from(rawAct));
+                  return;
+                }
+                setState(() => _currentNavIndex = 1);
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: parseHexColor(sc['btn_bg_color'], const Color(0x1AFF3B5C)),
+                foregroundColor: parseHexColor(sc['btn_text_color'], const Color(0xFFFF3B5C)),
+                side: BorderSide(color: parseHexColor(sc['btn_border_color'], const Color(0xFFFF3B5C))),
+                padding: EdgeInsets.symmetric(horizontal: btnPadH, vertical: btnPadV),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(btnRadius)),
+                elevation: 0,
+              ),
+              child: Text(
+                btnText,
+                style: TextStyle(fontSize: btnFontSize, fontWeight: FontWeight.w700),
+              ),
             ),
-            child: Text(
-              btnText,
-              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
-            ),
-          ),
+          ],
         ],
       ),
     );
@@ -1342,17 +1380,42 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
   }
 
   Widget _buildQuickActionsRow() {
+    final sc = _subscriptionCardCfg;
+    final showQa1 = sc['quick_action_show'] != false;
+    final qaIcon = resolveStorefrontIcon((sc['quick_action_icon'] ?? 'speed').toString());
+    final qaIconColor = parseHexColor(sc['quick_action_icon_color'], const Color(0xFFFF3B5C));
+    final qaBg = parseHexColor(sc['quick_action_bg_color'], const Color(0xFF0E0E14));
+    final qaBorder = parseHexColor(sc['quick_action_border_color'], const Color(0x1AFFFFFF));
+    final qaTitle = (sc['quick_action_title'] ?? _uiConfig['action_btn1_title'] ?? 'خرید اشتراک').toString();
+    final qaSub = (sc['quick_action_subtitle'] ?? _uiConfig['action_btn1_subtitle'] ?? 'پلن Pro و Plus').toString();
+    final qaTitleCol = parseHexColor(sc['quick_action_title_color'], Colors.white);
+    final qaSubCol = parseHexColor(sc['quick_action_subtitle_color'], const Color(0xFFA0A0B0));
+
     return Row(
       children: [
-        Expanded(
-          child: _buildActionButton(
-            icon: Icons.speed,
-            title: _uiConfig['action_btn1_title'] ?? 'خرید اشتراک',
-            subtitle: _uiConfig['action_btn1_subtitle'] ?? 'پلن Pro و Plus',
-            onTap: () => setState(() => _currentNavIndex = 1),
+        if (showQa1) ...[
+          Expanded(
+            child: _buildActionButton(
+              icon: qaIcon,
+              iconColor: qaIconColor,
+              bgColor: qaBg,
+              borderColor: qaBorder,
+              title: qaTitle,
+              titleColor: qaTitleCol,
+              subtitle: qaSub,
+              subtitleColor: qaSubCol,
+              onTap: () {
+                final rawAct = sc['quick_action_action'];
+                if (rawAct is Map && rawAct.isNotEmpty) {
+                  _dispatchStorefrontAction(Map<String, dynamic>.from(rawAct));
+                  return;
+                }
+                setState(() => _currentNavIndex = 1);
+              },
+            ),
           ),
-        ),
-        const SizedBox(width: 12),
+          const SizedBox(width: 12),
+        ],
         Expanded(
           child: _buildActionButton(
             icon: Icons.tune,
@@ -1370,9 +1433,14 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
     required String title,
     required String subtitle,
     required VoidCallback onTap,
+    Color iconColor = const Color(0xFFFF3B5C),
+    Color bgColor = const Color(0xFF0E0E14),
+    Color borderColor = const Color(0x1AFFFFFF),
+    Color titleColor = Colors.white,
+    Color subtitleColor = const Color(0xFFA0A0B0),
   }) {
     return Material(
-      color: const Color(0xFF0E0E14),
+      color: bgColor,
       borderRadius: BorderRadius.circular(12),
       clipBehavior: Clip.antiAlias,
       child: InkWell(
@@ -1383,16 +1451,16 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
           padding: const EdgeInsets.all(14),
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: const Color(0x1AFFFFFF)),
+            border: Border.all(color: borderColor),
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Icon(icon, color: const Color(0xFFFF3B5C), size: 22),
+              Icon(icon, color: iconColor, size: 22),
               const SizedBox(height: 8),
-              Text(title, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w800, color: Colors.white)),
+              Text(title, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800, color: titleColor)),
               const SizedBox(height: 2),
-              Text(subtitle, style: const TextStyle(fontSize: 11, color: Color(0xFFA0A0B0))),
+              Text(subtitle, style: TextStyle(fontSize: 11, color: subtitleColor)),
             ],
           ),
         ),
@@ -1564,7 +1632,7 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
     } else {
       await _showStorefrontFeedbackKey(
         'quote_error',
-        overrideRaw: quote['detail']?.toString(),
+        overrideRaw: quote['feedback'] ?? quote['detail']?.toString(),
         fallbackText: 'خطا در استعلام مشخصات پلن از سرور.',
       );
       return;
@@ -1761,7 +1829,7 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
         } else {
           await _showStorefrontFeedbackKey(
             'myket_verify_failed',
-            overrideRaw: valRes['message']?.toString(),
+            overrideRaw: valRes['feedback'] ?? valRes['message']?.toString(),
             fallbackText: 'خطا در تایید اشتراک مایکت. لطفاً چند لحظه بعد دوباره بررسی کنید.',
           );
         }
