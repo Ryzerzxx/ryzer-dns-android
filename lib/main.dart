@@ -196,7 +196,7 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
     if (_remoteConfig.isEmpty && mounted) {
       setState(() => _isLoadingRemoteConfig = true);
     }
-    final cfg = await ApiService.getRemoteConfig(currentVersion: '1.2.0');
+    final cfg = await ApiService.getRemoteConfig(currentVersion: '1.1.1');
     if (mounted) {
       if (cfg.isNotEmpty) {
         setState(() {
@@ -228,7 +228,7 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
   }
 
   void _checkAndPromptUpdate(Map<String, dynamic> cfg) {
-    const currentAppVersion = "1.2.0";
+    const currentAppVersion = "1.1.1";
     final latestVersion = cfg['latest_version'] ?? currentAppVersion;
     final isExplicitUpdate = cfg['update_available'] == true;
     final isHigherVersionAvailable = _isVersionLower(currentAppVersion, latestVersion);
@@ -2353,7 +2353,7 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
         const SizedBox(height: 18),
         const Center(
           child: Text(
-            'RyzerDNS Client • نسخه v1.2.0',
+            'RyzerDNS Client • نسخه v1.1.1',
             style: TextStyle(fontSize: 11.5, color: Colors.white38, fontWeight: FontWeight.w600),
           ),
         ),

@@ -475,7 +475,7 @@ class ApiService {
       ).timeout(const Duration(seconds: 5));
     } catch (_) {}
   }
-  static Future<Map<String, dynamic>> getRemoteConfig({String currentVersion = '1.2.0'}) async {
+  static Future<Map<String, dynamic>> getRemoteConfig({String currentVersion = '1.1.1'}) async {
     try {
       final cv = Uri.encodeComponent(currentVersion);
       final response = await http.get(
