@@ -1060,7 +1060,7 @@ class StorefrontPlansView extends StatelessWidget {
       final btnText = parseHexColor(st['btn_text_color'], Colors.white);
       final btnBorderColor = parseHexColor(st['btn_border_color'], Colors.transparent);
       final btnBorderWidth = _sfDouble(st['btn_border_width'], btnBorderColor != Colors.transparent ? 1.0 : 0.0);
-      return Container(
+      final upgradeCardWidget = Container(
         padding: EdgeInsets.symmetric(
           horizontal: _sfDouble(st['padding_h'], 14.0),
           vertical: _sfDouble(st['padding_v'], 11.0),
@@ -1135,17 +1135,42 @@ class StorefrontPlansView extends StatelessWidget {
                 ),
                 elevation: 0,
               ),
-              child: Text(
-                (st['button_text'] ?? 'ارتقا').toString(),
-                style: TextStyle(
-                  fontSize: _sfDouble(st['btn_font_size'], 12.0),
-                  fontWeight: FontWeight.w800,
-                ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if ((st['button_icon'] ?? '').toString().trim().isNotEmpty) ...[
+                    Icon(resolveStorefrontIcon(st['button_icon'].toString()), size: 15, color: btnText),
+                    const SizedBox(width: 5),
+                  ],
+                  Text(
+                    (st['button_text'] ?? 'ارتقا').toString(),
+                    style: TextStyle(
+                      fontSize: _sfDouble(st['btn_font_size'], 12.0),
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ],
               ),
             ),
           ],
         ),
       );
+      final upTapFbRaw = st['tap_feedback'] ?? st['tap_message'];
+      if (upTapFbRaw != null && upTapFbRaw.toString().trim().isNotEmpty) {
+        return GestureDetector(
+          onTap: () {
+            final fb = resolveStorefrontFeedback(upTapFbRaw, messages);
+            showServerFeedback(
+              context,
+              fb,
+              onToast: onShowToast,
+              onAction: (act) => _dispatchFeedbackAction(context, act),
+            );
+          },
+          child: upgradeCardWidget,
+        );
+      }
+      return upgradeCardWidget;
     }
 
     if (maxTierList.contains(userTier) && _sfBool(block['show_when_max_tier'], true)) {
@@ -1168,7 +1193,7 @@ class StorefrontPlansView extends StatelessWidget {
           children: [
             if (iconName.isNotEmpty) ...[
               Container(
-                padding: const EdgeInsets.all(8),
+                padding: EdgeInsets.all(_sfDouble(st['icon_padding'], 8.0)),
                 decoration: BoxDecoration(
                   color: parseHexColor(st['icon_bg_color'], const Color(0x1A00E676)),
                   borderRadius: BorderRadius.circular(10),
@@ -1176,7 +1201,7 @@ class StorefrontPlansView extends StatelessWidget {
                 child: Icon(
                   resolveStorefrontIcon(iconName),
                   color: parseHexColor(st['icon_color'], const Color(0xFF00E676)),
-                  size: 20,
+                  size: _sfDouble(st['icon_size'], 20.0),
                 ),
               ),
               const SizedBox(width: 12),
@@ -1188,7 +1213,7 @@ class StorefrontPlansView extends StatelessWidget {
                   Text(
                     (st['title'] ?? 'ارتقای اشتراک').toString(),
                     style: TextStyle(
-                      fontSize: 13,
+                      fontSize: _sfDouble(st['title_size'], 13.0),
                       fontWeight: FontWeight.w800,
                       color: parseHexColor(st['title_color'], Colors.white70),
                     ),
@@ -1198,7 +1223,7 @@ class StorefrontPlansView extends StatelessWidget {
                     Text(
                       st['subtitle'].toString(),
                       style: TextStyle(
-                        fontSize: 11,
+                        fontSize: _sfDouble(st['subtitle_size'], 11.0),
                         color: parseHexColor(st['subtitle_color'], const Color(0xFF8E8EA8)),
                       ),
                     ),
@@ -1210,7 +1235,7 @@ class StorefrontPlansView extends StatelessWidget {
               Icon(
                 resolveStorefrontIcon(trailingName),
                 color: parseHexColor(st['trailing_icon_color'], const Color(0xFF555566)),
-                size: 18,
+                size: _sfDouble(st['trailing_icon_size'], 18.0),
               ),
           ],
         ),
@@ -1448,7 +1473,7 @@ class StorefrontPlansView extends StatelessWidget {
             if (lockIcon.isNotEmpty) ...[
               Icon(
                 resolveStorefrontIcon(lockIcon),
-                size: 14,
+                size: _sfDouble(ln['icon_size'], 14.0),
                 color: parseHexColor(ln['icon_color'], const Color(0xFF8E8EA8)),
               ),
               const SizedBox(width: 6),
@@ -1458,7 +1483,7 @@ class StorefrontPlansView extends StatelessWidget {
                 lockText,
                 textAlign: TextAlign.center,
                 style: TextStyle(
-                  fontSize: 11.5,
+                  fontSize: _sfDouble(ln['font_size'], 11.5),
                   fontWeight: FontWeight.w700,
                   color: parseHexColor(ln['text_color'], const Color(0xFF8E8EA8)),
                 ),
@@ -1809,17 +1834,21 @@ class StorefrontPlansView extends StatelessWidget {
         .toList();
     final bgColor = enabled
         ? parseHexColor(style['bg_color'], defaultBg)
-        : const Color(0x14FFFFFF);
+        : parseHexColor(style['disabled_bg_color'], const Color(0x14FFFFFF));
     final borderColor = enabled
         ? parseHexColor(style['border_color'], defaultBorder)
-        : const Color(0x1AFFFFFF);
+        : parseHexColor(style['disabled_border_color'], const Color(0x1AFFFFFF));
     final borderWidth = _sfDouble(style['border_width'], defaultBorderW);
     final textColor = enabled
         ? parseHexColor(style['text_color'], Colors.white)
-        : const Color(0xFF707085);
+        : parseHexColor(style['disabled_text_color'], const Color(0xFF707085));
     final subtextColor = enabled
         ? parseHexColor(style['subtext_color'], const Color(0xFFA0A0B0))
-        : const Color(0xFF606075);
+        : parseHexColor(style['disabled_subtext_color'], const Color(0xFF606075));
+    final padH = _sfDouble(style['padding_h'], 8.0);
+    final labelSize = _sfDouble(style['label_size'], 11.0);
+    final priceSize = _sfDouble(style['price_size'], 12.0);
+    final sublabelSize = _sfDouble(style['sublabel_size'], 9.5);
 
     final labelBase = (opt['label'] ?? '').toString();
     final renewalLabel = (opt['renewal_label'] ?? '').toString().trim();
@@ -1851,7 +1880,7 @@ class StorefrontPlansView extends StatelessWidget {
         child: InkWell(
           onTap: (enabled || !silentDisabled) ? () => onPurchaseOption(opt, planBlock) : null,
           child: Padding(
-            padding: EdgeInsets.symmetric(horizontal: 8, vertical: padV),
+            padding: EdgeInsets.symmetric(horizontal: padH, vertical: padV),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
@@ -1876,7 +1905,7 @@ class StorefrontPlansView extends StatelessWidget {
                 Text(
                   labelText,
                   textAlign: TextAlign.center,
-                  style: TextStyle(fontSize: 11, color: subtextColor, fontWeight: FontWeight.w600),
+                  style: TextStyle(fontSize: labelSize, color: subtextColor, fontWeight: FontWeight.w600),
                 ),
                 if (origPriceText.isNotEmpty) ...[
                   const SizedBox(height: 1),
@@ -1894,14 +1923,14 @@ class StorefrontPlansView extends StatelessWidget {
                 Text(
                   priceText,
                   textAlign: TextAlign.center,
-                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800, color: textColor),
+                  style: TextStyle(fontSize: priceSize, fontWeight: FontWeight.w800, color: textColor),
                 ),
                 if (sublabel.isNotEmpty) ...[
                   const SizedBox(height: 2),
                   Text(
                     sublabel,
                     textAlign: TextAlign.center,
-                    style: TextStyle(fontSize: 9.5, color: subtextColor),
+                    style: TextStyle(fontSize: sublabelSize, color: subtextColor),
                   ),
                 ],
               ],
@@ -2300,13 +2329,91 @@ Future<bool?> showServerPreInvoiceDialog({
   final boxBg = parseHexColor(preCfg['box_bg_color'], const Color(0xFF14141E));
   final boxBorder = parseHexColor(preCfg['box_border_color'], const Color(0x1AFFFFFF));
   final boxRadius = _sfDouble(preCfg['box_border_radius'], 12.0);
+  final boxPadding = _sfDouble(preCfg['box_padding'], 14.0);
   final divColor = parseHexColor(preCfg['divider_color'], const Color(0x1AFFFFFF));
   final labelColor = parseHexColor(preCfg['label_color'], const Color(0xFFA0A0B0));
   final valColor = parseHexColor(preCfg['value_color'], const Color(0xFFE0E0EC));
+  final planValColor = parseHexColor(preCfg['plan_value_color'], Colors.white);
   final totalLblColor = parseHexColor(preCfg['total_label_color'], Colors.white);
   final totalValColor = parseHexColor(preCfg['total_value_color'], const Color(0xFF00E676));
+  final rowLblSize = _sfDouble(preCfg['row_label_size'], 12.0);
+  final rowValSize = _sfDouble(preCfg['row_value_size'], 13.0);
+  final totalLblSize = _sfDouble(preCfg['total_label_size'], 13.0);
+  final totalValSize = _sfDouble(preCfg['total_value_size'], 14.5);
+  final btnFontSize = _sfDouble(preCfg['btn_font_size'], 13.0);
   final footerNote = (preCfg['footer_note'] ?? 'پرداخت امن از طریق درگاه رسمی انجام می‌شود و اشتراک بلافاصله فعال می‌گردد.').toString();
   final warningText = (preCfg['warning_text'] ?? '').toString().trim();
+  final extraRows = _sfList(preCfg['extra_rows']).map(_sfMap).where((r) => (r['label'] ?? '').toString().trim().isNotEmpty || (r['value'] ?? '').toString().trim().isNotEmpty).toList();
+
+  final preBoxWidgets = <Widget>[];
+  void addPreRow(Widget rowWidget, {double divHeight = 18}) {
+    if (preBoxWidgets.isNotEmpty) {
+      preBoxWidgets.add(Divider(color: divColor, height: divHeight));
+    }
+    preBoxWidgets.add(rowWidget);
+  }
+  if (_sfBool(preCfg['show_plan_row'], true)) {
+    addPreRow(Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        Text((preCfg['label_plan'] ?? 'پلن انتخابی').toString(), style: TextStyle(fontSize: rowLblSize, color: labelColor)),
+        const SizedBox(width: 8),
+        Flexible(
+          child: Text(
+            planDisplayTitle,
+            textAlign: TextAlign.left,
+            style: TextStyle(fontSize: rowValSize, fontWeight: FontWeight.w800, color: planValColor),
+          ),
+        ),
+      ],
+    ));
+  }
+  if (_sfBool(preCfg['show_base_row'], true)) {
+    addPreRow(Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        Text((preCfg['label_base_amount'] ?? 'مبلغ پلن').toString(), style: TextStyle(fontSize: rowLblSize, color: labelColor)),
+        Text(baseFormatted, style: TextStyle(fontSize: rowValSize, fontWeight: FontWeight.w700, color: valColor)),
+      ],
+    ));
+  }
+  if (_sfBool(preCfg['show_fee_row'], true)) {
+    addPreRow(Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        Text((preCfg['label_fee'] ?? 'کارمزد درگاه پرداخت').toString(), style: TextStyle(fontSize: rowLblSize, color: labelColor)),
+        Text(feeFormatted, style: TextStyle(fontSize: (rowValSize - 0.5).clamp(9.0, 22.0), fontWeight: FontWeight.w600, color: labelColor)),
+      ],
+    ));
+  }
+  for (final er in extraRows) {
+    final erLblCol = parseHexColor(er['label_color'], labelColor);
+    final erValCol = parseHexColor(er['color'], valColor);
+    final erBold = _sfBool(er['bold'], false);
+    addPreRow(Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        Text((er['label'] ?? '').toString(), style: TextStyle(fontSize: rowLblSize, color: erLblCol)),
+        const SizedBox(width: 8),
+        Flexible(
+          child: Text(
+            (er['value'] ?? '').toString(),
+            textAlign: TextAlign.left,
+            style: TextStyle(fontSize: rowValSize, fontWeight: erBold ? FontWeight.w800 : FontWeight.w700, color: erValCol),
+          ),
+        ),
+      ],
+    ));
+  }
+  if (_sfBool(preCfg['show_total_row'], true)) {
+    addPreRow(Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        Text((preCfg['label_total'] ?? 'مبلغ نهایی قابل پرداخت').toString(), style: TextStyle(fontSize: totalLblSize, fontWeight: FontWeight.w800, color: totalLblColor)),
+        Text(totalFormatted, style: TextStyle(fontSize: totalValSize, fontWeight: FontWeight.w900, color: totalValColor)),
+      ],
+    ), divHeight: 20);
+  }
 
   return showDialog<bool>(
     context: context,
@@ -2335,7 +2442,7 @@ Future<bool?> showServerPreInvoiceDialog({
               child: Text(
                 (preCfg['title'] ?? 'پیش‌فاکتور خرید اشتراک').toString(),
                 style: TextStyle(
-                  fontSize: 15,
+                  fontSize: _sfDouble(preCfg['title_size'], 15.0),
                   fontWeight: FontWeight.w800,
                   color: parseHexColor(preCfg['title_color'], Colors.white),
                 ),
@@ -2347,56 +2454,13 @@ Future<bool?> showServerPreInvoiceDialog({
           mainAxisSize: MainAxisSize.min,
           children: [
             Container(
-              padding: const EdgeInsets.all(14),
+              padding: EdgeInsets.all(boxPadding),
               decoration: BoxDecoration(
                 color: boxBg,
                 borderRadius: BorderRadius.circular(boxRadius),
                 border: Border.all(color: boxBorder),
               ),
-              child: Column(
-                children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Text((preCfg['label_plan'] ?? 'پلن انتخابی').toString(), style: TextStyle(fontSize: 12, color: labelColor)),
-                      const SizedBox(width: 8),
-                      Flexible(
-                        child: Text(
-                          planDisplayTitle,
-                          textAlign: TextAlign.left,
-                          style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w800, color: Colors.white),
-                        ),
-                      ),
-                    ],
-                  ),
-                  Divider(color: divColor, height: 18),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Text((preCfg['label_base_amount'] ?? 'مبلغ پلن').toString(), style: TextStyle(fontSize: 12, color: labelColor)),
-                      Text(baseFormatted, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: valColor)),
-                    ],
-                  ),
-                  if (_sfBool(preCfg['show_fee_row'], true)) ...[
-                    Divider(color: divColor, height: 18),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Text((preCfg['label_fee'] ?? 'کارمزد درگاه پرداخت').toString(), style: TextStyle(fontSize: 12, color: labelColor)),
-                        Text(feeFormatted, style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: labelColor)),
-                      ],
-                    ),
-                  ],
-                  Divider(color: divColor, height: 20),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Text((preCfg['label_total'] ?? 'مبلغ نهایی قابل پرداخت').toString(), style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800, color: totalLblColor)),
-                      Text(totalFormatted, style: TextStyle(fontSize: 14.5, fontWeight: FontWeight.w900, color: totalValColor)),
-                    ],
-                  ),
-                ],
-              ),
+              child: Column(children: preBoxWidgets),
             ),
             if (warningText.isNotEmpty) ...[
               const SizedBox(height: 10),
@@ -2425,7 +2489,7 @@ Future<bool?> showServerPreInvoiceDialog({
               Text(
                 footerNote,
                 style: TextStyle(
-                  fontSize: 11,
+                  fontSize: _sfDouble(preCfg['footer_note_size'], 11.0),
                   color: parseHexColor(preCfg['footer_note_color'], const Color(0xFFA0A0B0)),
                   height: 1.5,
                 ),
@@ -2445,9 +2509,9 @@ Future<bool?> showServerPreInvoiceDialog({
                     side: BorderSide(color: parseHexColor(preCfg['cancel_btn_border_color'], const Color(0x33FFFFFF))),
                     foregroundColor: parseHexColor(preCfg['cancel_btn_text_color'], Colors.white70),
                     padding: const EdgeInsets.symmetric(vertical: 11),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(_sfDouble(preCfg['cancel_btn_radius'], 10.0))),
                   ),
-                  child: Text((preCfg['cancel_btn_text'] ?? 'انصراف').toString(), style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700)),
+                  child: Text((preCfg['cancel_btn_text'] ?? 'انصراف').toString(), style: TextStyle(fontSize: btnFontSize, fontWeight: FontWeight.w700)),
                 ),
               ),
               const SizedBox(width: 12),
@@ -2466,7 +2530,7 @@ Future<bool?> showServerPreInvoiceDialog({
                   ),
                   child: Text(
                     (preCfg['confirm_btn_text'] ?? 'انتقال به درگاه پرداخت').toString(),
-                    style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w900),
+                    style: TextStyle(fontSize: btnFontSize, fontWeight: FontWeight.w900),
                   ),
                 ),
               ),
@@ -2499,7 +2563,102 @@ Future<bool?> showServerUpgradeInvoiceDialog({
   final boxBorder = parseHexColor(upiCfg['box_border_color'], const Color(0x1AFFFFFF));
   final boxRadius = _sfDouble(upiCfg['box_border_radius'], 12.0);
   final divColor = parseHexColor(upiCfg['divider_color'], const Color(0x1AFFFFFF));
+  final labelColor = parseHexColor(upiCfg['label_color'], const Color(0xFFA0A0B0));
+  final valColor = parseHexColor(upiCfg['value_color'], const Color(0xFFE0E0EC));
+  final fromPlanColor = parseHexColor(upiCfg['from_plan_color'], Colors.white);
+  final toPlanColor = parseHexColor(upiCfg['to_plan_color'], const Color(0xFFFF3B5C));
+  final totalLblColor = parseHexColor(upiCfg['total_label_color'], Colors.white);
+  final totalValColor = parseHexColor(upiCfg['total_value_color'], const Color(0xFF00E676));
+  final rowLblSize = _sfDouble(upiCfg['row_label_size'], 12.0);
+  final rowValSize = _sfDouble(upiCfg['row_value_size'], 13.0);
+  final totalLblSize = _sfDouble(upiCfg['total_label_size'], 13.0);
+  final totalValSize = _sfDouble(upiCfg['total_value_size'], 14.5);
+  final btnFontSize = _sfDouble(upiCfg['btn_font_size'], 13.0);
+  final boxPadding = _sfDouble(upiCfg['box_padding'], 14.0);
+  final warningText = (upiCfg['warning_text'] ?? '').toString().trim();
   final footerNote = (upiCfg['footer_note'] ?? 'این مبلغ بر اساس روز‌های باقی‌مانده شما محاسبه شده است.').toString();
+  final extraRows = _sfList(upiCfg['extra_rows']).map(_sfMap).where((r) => (r['label'] ?? '').toString().trim().isNotEmpty || (r['value'] ?? '').toString().trim().isNotEmpty).toList();
+
+  final upiBoxWidgets = <Widget>[];
+  void addUpiRow(Widget rowWidget, {double divHeight = 18}) {
+    if (upiBoxWidgets.isNotEmpty) {
+      upiBoxWidgets.add(Divider(color: divColor, height: divHeight));
+    }
+    upiBoxWidgets.add(rowWidget);
+  }
+  if (_sfBool(upiCfg['show_from_row'], true)) {
+    addUpiRow(Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        Text((upiCfg['label_from_plan'] ?? 'سرویس / پلن فعلی').toString(), style: TextStyle(fontSize: rowLblSize, color: labelColor)),
+        Text(fromPlan, style: TextStyle(fontSize: rowValSize, fontWeight: FontWeight.w800, color: fromPlanColor)),
+      ],
+    ));
+  }
+  if (_sfBool(upiCfg['show_to_row'], true)) {
+    addUpiRow(Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        Text((upiCfg['label_to_plan'] ?? 'پلن انتخابی مقصد').toString(), style: TextStyle(fontSize: rowLblSize, color: labelColor)),
+        Text(toPlan, style: TextStyle(fontSize: rowValSize, fontWeight: FontWeight.w800, color: toPlanColor)),
+      ],
+    ));
+  }
+  if (_sfBool(upiCfg['show_remaining_days_row'], true) && remainingDays > 0) {
+    addUpiRow(Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        Text((upiCfg['label_remaining_days'] ?? 'مدت زمان باقی‌مانده').toString(), style: TextStyle(fontSize: rowLblSize, color: labelColor)),
+        Text('$remainingDays ${(upiCfg['days_suffix'] ?? 'روز').toString()}', style: TextStyle(fontSize: rowValSize, fontWeight: FontWeight.w700, color: valColor)),
+      ],
+    ));
+  }
+  if (_sfBool(upiCfg['show_base_row'], true)) {
+    addUpiRow(Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        Text((upiCfg['label_base_amount'] ?? 'مبلغ مابه‌التفاوت پلن').toString(), style: TextStyle(fontSize: rowLblSize, color: labelColor)),
+        Text(baseFormatted, style: TextStyle(fontSize: rowValSize, fontWeight: FontWeight.w700, color: valColor)),
+      ],
+    ));
+  }
+  if (_sfBool(upiCfg['show_fee_row'], true)) {
+    addUpiRow(Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        Text((upiCfg['label_fee'] ?? 'کارمزد درگاه پرداخت').toString(), style: TextStyle(fontSize: rowLblSize, color: labelColor)),
+        Text(feeFormatted, style: TextStyle(fontSize: (rowValSize - 0.5).clamp(9.0, 22.0), fontWeight: FontWeight.w600, color: labelColor)),
+      ],
+    ));
+  }
+  for (final er in extraRows) {
+    final erLblCol = parseHexColor(er['label_color'], labelColor);
+    final erValCol = parseHexColor(er['color'], valColor);
+    final erBold = _sfBool(er['bold'], false);
+    addUpiRow(Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        Text((er['label'] ?? '').toString(), style: TextStyle(fontSize: rowLblSize, color: erLblCol)),
+        const SizedBox(width: 8),
+        Flexible(
+          child: Text(
+            (er['value'] ?? '').toString(),
+            textAlign: TextAlign.left,
+            style: TextStyle(fontSize: rowValSize, fontWeight: erBold ? FontWeight.w800 : FontWeight.w700, color: erValCol),
+          ),
+        ),
+      ],
+    ));
+  }
+  if (_sfBool(upiCfg['show_total_row'], true)) {
+    addUpiRow(Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        Text((upiCfg['label_total'] ?? 'مبلغ نهایی قابل پرداخت').toString(), style: TextStyle(fontSize: totalLblSize, fontWeight: FontWeight.w800, color: totalLblColor)),
+        Text(totalFormatted, style: TextStyle(fontSize: totalValSize, fontWeight: FontWeight.w900, color: totalValColor)),
+      ],
+    ), divHeight: 20);
+  }
 
   return showDialog<bool>(
     context: context,
@@ -2525,7 +2684,7 @@ Future<bool?> showServerUpgradeInvoiceDialog({
               child: Text(
                 (upiCfg['title'] ?? 'پیش‌فاکتور ارتقای اشتراک').toString(),
                 style: TextStyle(
-                  fontSize: 15,
+                  fontSize: _sfDouble(upiCfg['title_size'], 15.0),
                   fontWeight: FontWeight.w800,
                   color: parseHexColor(upiCfg['title_color'], Colors.white),
                 ),
@@ -2537,68 +2696,36 @@ Future<bool?> showServerUpgradeInvoiceDialog({
           mainAxisSize: MainAxisSize.min,
           children: [
             Container(
-              padding: const EdgeInsets.all(14),
+              padding: EdgeInsets.all(boxPadding),
               decoration: BoxDecoration(
                 color: boxBg,
                 borderRadius: BorderRadius.circular(boxRadius),
                 border: Border.all(color: boxBorder),
               ),
-              child: Column(
-                children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Text((upiCfg['label_from_plan'] ?? 'سرویس / پلن فعلی').toString(), style: const TextStyle(fontSize: 12, color: Color(0xFFA0A0B0))),
-                      Text(fromPlan, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w800, color: Colors.white)),
-                    ],
-                  ),
-                  Divider(color: divColor, height: 18),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Text((upiCfg['label_to_plan'] ?? 'پلن انتخابی مقصد').toString(), style: const TextStyle(fontSize: 12, color: Color(0xFFA0A0B0))),
-                      Text(toPlan, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800, color: parseHexColor(upiCfg['to_plan_color'], const Color(0xFFFF3B5C)))),
-                    ],
-                  ),
-                  if (_sfBool(upiCfg['show_remaining_days_row'], true) && remainingDays > 0) ...[
-                    Divider(color: divColor, height: 18),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Text((upiCfg['label_remaining_days'] ?? 'مدت زمان باقی‌مانده').toString(), style: const TextStyle(fontSize: 12, color: Color(0xFFA0A0B0))),
-                        Text('$remainingDays ${(upiCfg['days_suffix'] ?? 'روز').toString()}', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: Color(0xFFE0E0EC))),
-                      ],
-                    ),
-                  ],
-                  Divider(color: divColor, height: 18),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Text((upiCfg['label_base_amount'] ?? 'مبلغ مابه‌التفاوت پلن').toString(), style: const TextStyle(fontSize: 12, color: Color(0xFFA0A0B0))),
-                      Text(baseFormatted, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: Color(0xFFE0E0EC))),
-                    ],
-                  ),
-                  if (_sfBool(upiCfg['show_fee_row'], true)) ...[
-                    Divider(color: divColor, height: 18),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Text((upiCfg['label_fee'] ?? 'کارمزد درگاه پرداخت').toString(), style: const TextStyle(fontSize: 12, color: Color(0xFFA0A0B0))),
-                        Text(feeFormatted, style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: Color(0xFFA0A0B0))),
-                      ],
-                    ),
-                  ],
-                  Divider(color: divColor, height: 20),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Text((upiCfg['label_total'] ?? 'مبلغ نهایی قابل پرداخت').toString(), style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w800, color: Colors.white)),
-                      Text(totalFormatted, style: TextStyle(fontSize: 14.5, fontWeight: FontWeight.w900, color: parseHexColor(upiCfg['total_value_color'], const Color(0xFF00E676)))),
-                    ],
-                  ),
-                ],
-              ),
+              child: Column(children: upiBoxWidgets),
             ),
+            if (warningText.isNotEmpty) ...[
+              const SizedBox(height: 10),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                decoration: BoxDecoration(
+                  color: parseHexColor(upiCfg['warning_bg_color'], const Color(0x1AFFAB00)),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: parseHexColor(upiCfg['warning_border_color'], const Color(0x4DFFAB00))),
+                ),
+                child: Text(
+                  warningText,
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                    color: parseHexColor(upiCfg['warning_text_color'], const Color(0xFFFFD54F)),
+                    height: 1.5,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+              ),
+            ],
             if (footerNote.isNotEmpty) ...[
               const SizedBox(height: 12),
               Container(
@@ -2610,7 +2737,7 @@ Future<bool?> showServerUpgradeInvoiceDialog({
                 ),
                 child: Text(
                   footerNote,
-                  style: TextStyle(fontSize: 11, color: parseHexColor(upiCfg['footer_note_color'], const Color(0xFFA0A0B0))),
+                  style: TextStyle(fontSize: _sfDouble(upiCfg['footer_note_size'], 11.0), color: parseHexColor(upiCfg['footer_note_color'], const Color(0xFFA0A0B0))),
                   textAlign: TextAlign.center,
                 ),
               ),
@@ -2625,12 +2752,12 @@ Future<bool?> showServerUpgradeInvoiceDialog({
                 child: OutlinedButton(
                   onPressed: () => Navigator.pop(ctx, false),
                   style: OutlinedButton.styleFrom(
-                    side: const BorderSide(color: Color(0x33FFFFFF)),
-                    foregroundColor: Colors.white70,
+                    side: BorderSide(color: parseHexColor(upiCfg['cancel_btn_border_color'], const Color(0x33FFFFFF))),
+                    foregroundColor: parseHexColor(upiCfg['cancel_btn_text_color'], Colors.white70),
                     padding: const EdgeInsets.symmetric(vertical: 11),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(_sfDouble(upiCfg['cancel_btn_radius'], 10.0))),
                   ),
-                  child: Text((upiCfg['cancel_btn_text'] ?? 'انصراف').toString(), style: const TextStyle(color: Colors.white70, fontSize: 13, fontWeight: FontWeight.w700)),
+                  child: Text((upiCfg['cancel_btn_text'] ?? 'انصراف').toString(), style: TextStyle(color: parseHexColor(upiCfg['cancel_btn_text_color'], Colors.white70), fontSize: btnFontSize, fontWeight: FontWeight.w700)),
                 ),
               ),
               const SizedBox(width: 12),
@@ -2649,7 +2776,7 @@ Future<bool?> showServerUpgradeInvoiceDialog({
                   ),
                   child: Text(
                     (upiCfg['confirm_btn_text'] ?? 'انتقال به درگاه پرداخت').toString(),
-                    style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w900),
+                    style: TextStyle(fontSize: btnFontSize, fontWeight: FontWeight.w900),
                   ),
                 ),
               ),
