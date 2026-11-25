@@ -571,11 +571,15 @@ StorefrontRuleResult evaluateStorefrontSubscriptionRule({
     final act = (r['action'] ?? 'allow').toString().trim().toLowerCase();
     if (act == 'block' || act == 'upgrade') {
       final rawFb = r['feedback'] ?? r['message'];
-      final fk = (r['feedback_key'] ?? defaultMsgKey).toString().trim();
+      final explicitFk = (r['feedback_key'] ?? '').toString().trim();
+      if (act == 'upgrade' && rawFb == null && explicitFk.isEmpty) {
+        return const StorefrontRuleResult(action: 'upgrade', feedback: {'mode': 'silent', 'message': ''});
+      }
+      final fk = explicitFk.isNotEmpty ? explicitFk : defaultMsgKey;
       final fb = resolveStorefrontFeedback(
         rawFb,
         messages,
-        fallbackKey: fk.isNotEmpty ? fk : defaultMsgKey,
+        fallbackKey: fk,
         fallbackText: defaultMsgText,
         vars: vars,
       );
