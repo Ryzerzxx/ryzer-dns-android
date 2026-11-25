@@ -1502,7 +1502,7 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
     if (ruleRes.action == 'upgrade') {
       final fbMsg = (ruleRes.feedback['message'] ?? '').toString().trim();
       final fbMode = (ruleRes.feedback['mode'] ?? 'silent').toString().trim().toLowerCase();
-      if (fbMode != 'silent' && fbMsg.isNotEmpty) {
+      if (fbMode == 'dialog') {
         if (!mounted) return;
         await showServerFeedback(
           context,
@@ -1511,6 +1511,9 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
           onAction: _dispatchStorefrontAction,
         );
         return;
+      }
+      if (fbMode != 'silent' && fbMsg.isNotEmpty) {
+        _showToast(fbMsg);
       }
       await _handleUpgradePlan();
       return;
