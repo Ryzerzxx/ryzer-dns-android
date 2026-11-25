@@ -1055,76 +1055,92 @@ class StorefrontPlansView extends StatelessWidget {
 
     if (showForTiers.contains(userTier)) {
       final st = _sfMap(block['upgrade_state']);
-      final iconName = (st['icon'] ?? 'upgrade').toString();
+      final iconName = (st['icon'] ?? 'workspace_premium').toString();
+      final btnBg = parseHexColor(st['btn_bg_color'], const Color(0xFFD91B35));
+      final btnText = parseHexColor(st['btn_text_color'], Colors.white);
+      final btnBorderColor = parseHexColor(st['btn_border_color'], Colors.transparent);
+      final btnBorderWidth = _sfDouble(st['btn_border_width'], btnBorderColor != Colors.transparent ? 1.0 : 0.0);
       return Container(
         padding: EdgeInsets.symmetric(
-          horizontal: _sfDouble(st['padding_h'], 16.0),
-          vertical: _sfDouble(st['padding_v'], 16.0),
+          horizontal: _sfDouble(st['padding_h'], 14.0),
+          vertical: _sfDouble(st['padding_v'], 11.0),
         ),
         decoration: buildStorefrontDecoration(
           st,
           defaultBg: const Color(0xFF0E0E14),
-          defaultBorder: const Color(0x80FFAB00),
-          defaultBorderWidth: 1.2,
-          defaultRadius: 14.0,
+          defaultBorder: const Color(0x4DFF3B5C),
+          defaultBorderWidth: 1.0,
+          defaultRadius: 13.0,
         ),
         child: Row(
           children: [
             if (iconName.isNotEmpty) ...[
               Container(
-                padding: const EdgeInsets.all(9),
+                padding: EdgeInsets.all(_sfDouble(st['icon_padding'], 7.0)),
                 decoration: BoxDecoration(
-                  color: parseHexColor(st['icon_bg_color'], const Color(0x33FFAB00)),
-                  borderRadius: BorderRadius.circular(10),
+                  color: parseHexColor(st['icon_bg_color'], const Color(0x1AFF3B5C)),
+                  borderRadius: BorderRadius.circular(9),
                 ),
                 child: Icon(
                   resolveStorefrontIcon(iconName),
-                  color: parseHexColor(st['icon_color'], const Color(0xFFFFAB00)),
-                  size: 24,
+                  color: parseHexColor(st['icon_color'], const Color(0xFFFF3B5C)),
+                  size: _sfDouble(st['icon_size'], 19.0),
                 ),
               ),
-              const SizedBox(width: 14),
+              const SizedBox(width: 11),
             ],
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
                 children: [
                   Text(
-                    (st['title'] ?? 'ارتقای اشتراک به Ryzer PRO').toString(),
+                    (st['title'] ?? 'ارتقا به پلن Ryzer PRO').toString(),
                     style: TextStyle(
-                      fontSize: 13.5,
-                      fontWeight: FontWeight.w900,
+                      fontSize: _sfDouble(st['title_size'], 13.0),
+                      fontWeight: FontWeight.w800,
                       color: parseHexColor(st['title_color'], Colors.white),
                     ),
                   ),
                   if ((st['subtitle'] ?? '').toString().isNotEmpty) ...[
-                    const SizedBox(height: 3),
+                    const SizedBox(height: 2),
                     Text(
                       st['subtitle'].toString(),
                       style: TextStyle(
-                        fontSize: 11,
-                        color: parseHexColor(st['subtitle_color'], const Color(0xFFFFD54F)),
+                        fontSize: _sfDouble(st['subtitle_size'], 11.0),
+                        color: parseHexColor(st['subtitle_color'], const Color(0xFFA0A0B0)),
                       ),
                     ),
                   ],
                 ],
               ),
             ),
-            const SizedBox(width: 8),
+            const SizedBox(width: 10),
             ElevatedButton(
               onPressed: onUpgrade,
               style: ElevatedButton.styleFrom(
-                backgroundColor: parseHexColor(st['btn_bg_color'], const Color(0xFFFFAB00)),
-                foregroundColor: parseHexColor(st['btn_text_color'], Colors.black),
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                backgroundColor: btnBg,
+                foregroundColor: btnText,
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                minimumSize: const Size(0, 34),
+                padding: EdgeInsets.symmetric(
+                  horizontal: _sfDouble(st['btn_padding_h'], 14.0),
+                  vertical: _sfDouble(st['btn_padding_v'], 7.0),
+                ),
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(_sfDouble(st['btn_border_radius'], 8.0)),
+                  side: btnBorderWidth > 0 && btnBorderColor != Colors.transparent
+                      ? BorderSide(color: btnBorderColor, width: btnBorderWidth)
+                      : BorderSide.none,
                 ),
                 elevation: 0,
               ),
               child: Text(
                 (st['button_text'] ?? 'ارتقا').toString(),
-                style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w900),
+                style: TextStyle(
+                  fontSize: _sfDouble(st['btn_font_size'], 12.0),
+                  fontWeight: FontWeight.w800,
+                ),
               ),
             ),
           ],
@@ -1471,22 +1487,34 @@ class StorefrontPlansView extends StatelessWidget {
       }
     } else if (showUpgrade) {
       final ub = _sfMap(block['upgrade_button']);
-      final upIcon = (ub['icon'] ?? 'upgrade').toString();
+      final upIcon = (ub['icon'] ?? 'workspace_premium').toString();
+      final ubBorderColor = parseHexColor(ub['border_color'], Colors.transparent);
+      final ubBorderWidth = _sfDouble(ub['border_width'], ubBorderColor != Colors.transparent ? 1.0 : 0.0);
       actionArea = SizedBox(
         width: double.infinity,
         child: ElevatedButton.icon(
           onPressed: onUpgrade,
-          icon: upIcon.isNotEmpty ? Icon(resolveStorefrontIcon(upIcon), size: 16) : const SizedBox.shrink(),
+          icon: upIcon.isNotEmpty
+              ? Icon(resolveStorefrontIcon(upIcon), size: _sfDouble(ub['icon_size'], 16.0))
+              : const SizedBox.shrink(),
           label: Text(
             (ub['text'] ?? 'ارتقا به پلن PRO (مابه‌التفاوت)').toString(),
-            style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w800),
+            style: TextStyle(
+              fontSize: _sfDouble(ub['font_size'], 12.0),
+              fontWeight: FontWeight.w800,
+            ),
           ),
           style: ElevatedButton.styleFrom(
-            backgroundColor: parseHexColor(ub['bg_color'], const Color(0xFFFFAB00)),
-            foregroundColor: parseHexColor(ub['text_color'], Colors.black),
+            backgroundColor: parseHexColor(ub['bg_color'], const Color(0xFFD91B35)),
+            foregroundColor: parseHexColor(ub['text_color'], Colors.white),
+            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            minimumSize: const Size(0, 40),
             padding: EdgeInsets.symmetric(vertical: _sfDouble(ub['padding_v'], 10.0)),
             shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(_sfDouble(ub['border_radius'], 8.0)),
+              borderRadius: BorderRadius.circular(_sfDouble(ub['border_radius'], 9.0)),
+              side: ubBorderWidth > 0 && ubBorderColor != Colors.transparent
+                  ? BorderSide(color: ubBorderColor, width: ubBorderWidth)
+                  : BorderSide.none,
             ),
             elevation: 0,
           ),
@@ -2461,12 +2489,12 @@ Future<bool?> showServerUpgradeInvoiceDialog({
   required String totalFormatted,
 }) {
   final dlgBg = parseHexColor(upiCfg['dialog_bg_color'], const Color(0xFF0E0E14));
-  final dlgBorder = parseHexColor(upiCfg['dialog_border_color'], const Color(0x33FFAB00));
+  final dlgBorder = parseHexColor(upiCfg['dialog_border_color'], const Color(0x4DFF3B5C));
   final dlgBorderW = _sfDouble(upiCfg['dialog_border_width'], 1.0);
   final dlgRadius = _sfDouble(upiCfg['dialog_border_radius'], 16.0);
-  final iconName = (upiCfg['icon'] ?? 'upgrade').toString();
-  final iconColor = parseHexColor(upiCfg['icon_color'], const Color(0xFFFFAB00));
-  final iconBg = parseHexColor(upiCfg['icon_bg_color'], const Color(0x33FFAB00));
+  final iconName = (upiCfg['icon'] ?? 'workspace_premium').toString();
+  final iconColor = parseHexColor(upiCfg['icon_color'], const Color(0xFFFF3B5C));
+  final iconBg = parseHexColor(upiCfg['icon_bg_color'], const Color(0x1AFF3B5C));
   final boxBg = parseHexColor(upiCfg['box_bg_color'], const Color(0xFF14141E));
   final boxBorder = parseHexColor(upiCfg['box_border_color'], const Color(0x1AFFFFFF));
   final boxRadius = _sfDouble(upiCfg['box_border_radius'], 12.0);
@@ -2529,7 +2557,7 @@ Future<bool?> showServerUpgradeInvoiceDialog({
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
                       Text((upiCfg['label_to_plan'] ?? 'پلن انتخابی مقصد').toString(), style: const TextStyle(fontSize: 12, color: Color(0xFFA0A0B0))),
-                      Text(toPlan, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800, color: parseHexColor(upiCfg['to_plan_color'], const Color(0xFFFFAB00)))),
+                      Text(toPlan, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800, color: parseHexColor(upiCfg['to_plan_color'], const Color(0xFFFF3B5C)))),
                     ],
                   ),
                   if (_sfBool(upiCfg['show_remaining_days_row'], true) && remainingDays > 0) ...[
@@ -2611,8 +2639,8 @@ Future<bool?> showServerUpgradeInvoiceDialog({
                 child: ElevatedButton(
                   onPressed: () => Navigator.pop(ctx, true),
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: parseHexColor(upiCfg['confirm_btn_bg_color'], const Color(0xFFFFAB00)),
-                    foregroundColor: parseHexColor(upiCfg['confirm_btn_text_color'], Colors.black),
+                    backgroundColor: parseHexColor(upiCfg['confirm_btn_bg_color'], const Color(0xFFD91B35)),
+                    foregroundColor: parseHexColor(upiCfg['confirm_btn_text_color'], Colors.white),
                     elevation: 0,
                     padding: const EdgeInsets.symmetric(vertical: 11),
                     shape: RoundedRectangleBorder(
