@@ -92,6 +92,75 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
     return {};
   }
 
+  Map<String, dynamic> get _storefrontMessages {
+    final raw = _storefrontConfig['messages'];
+    return raw is Map<String, dynamic> ? raw : (raw is Map ? Map<String, dynamic>.from(raw) : {});
+  }
+
+  Map<String, dynamic> get _subscriptionCardCfg {
+    final raw = _storefrontConfig['subscription_card'];
+    return raw is Map<String, dynamic> ? raw : (raw is Map ? Map<String, dynamic>.from(raw) : {});
+  }
+
+  Future<void> _dispatchStorefrontAction(Map<String, dynamic> act) async {
+    final t = (act['type'] ?? act['action_type'] ?? '').toString().trim().toLowerCase();
+    final target = (act['target'] ?? '').toString().trim();
+    switch (t) {
+      case 'open_url':
+        final u = (act['url'] ?? target).toString().trim();
+        if (u.isNotEmpty) await _launchExternalUrl(u);
+        break;
+      case 'switch_tab':
+        final idx = (act['tab_index'] is num)
+            ? (act['tab_index'] as num).toInt()
+            : (int.tryParse(target) ?? 0);
+        if (mounted) setState(() => _currentNavIndex = idx.clamp(0, 3));
+        break;
+      case 'open_auth':
+        _showAuthModal();
+        break;
+      case 'open_upgrade':
+        await _handleUpgradePlan();
+        break;
+      case 'copy':
+      case 'copy_text':
+        final val = (act['copy_value'] ?? target).toString();
+        if (val.isNotEmpty) {
+          Clipboard.setData(ClipboardData(text: val));
+          _showToast((act['toast_text'] ?? 'کپی شد: $val').toString());
+        }
+        break;
+      case 'refresh':
+        await _fetchRemoteConfig(checkUpdate: false);
+        if (_userToken != null && _userToken!.isNotEmpty) await _refreshUserProfile();
+        break;
+      default:
+        break;
+    }
+  }
+
+  Future<void> _showStorefrontFeedbackKey(
+    String key, {
+    String? fallbackText,
+    dynamic overrideRaw,
+    Map<String, dynamic>? vars,
+  }) async {
+    if (!mounted) return;
+    final fb = resolveStorefrontFeedback(
+      overrideRaw,
+      _storefrontMessages,
+      fallbackKey: key,
+      fallbackText: fallbackText,
+      vars: vars,
+    );
+    await showServerFeedback(
+      context,
+      fb,
+      onToast: _showToast,
+      onAction: _dispatchStorefrontAction,
+    );
+  }
+
   @override
   void initState() {
     super.initState();
@@ -449,7 +518,10 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
   Future<void> _refreshPing() async {
     if (_isMeasuringPing) return;
     setState(() => _isMeasuringPing = true);
-    final ping = await VpnManager.measurePing('87.248.145.40');
+    final pingTarget = _remoteConfig['primary_dns']?.toString().trim().isNotEmpty == true
+        ? _remoteConfig['primary_dns'].toString().trim()
+        : '194.32.214.108';
+    final ping = await VpnManager.measurePing(pingTarget);
     if (mounted) {
       setState(() {
         _pingMs = ping;
@@ -740,27 +812,33 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
   }
 
   Widget _buildSubscriptionCard() {
+    final sc = _subscriptionCardCfg;
+    final cardBg = parseHexColor(sc['card_bg_color'], const Color(0xFF0E0E14));
+
     if (_userToken == null) {
+      final guestText = (sc['guest_text'] ?? 'جهت استفاده از خدمات هوشمند، وارد حساب خود شوید.').toString();
+      final guestBtnText = (sc['guest_btn_text'] ?? 'ورود سریع یا ایجاد حساب').toString();
+      final guestBorder = parseHexColor(sc['guest_border_color'], const Color(0x1AFFFFFF));
       return Container(
         width: double.infinity,
         padding: const EdgeInsets.all(18),
         decoration: BoxDecoration(
-          color: const Color(0xFF0E0E14),
+          color: cardBg,
           borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: const Color(0x1AFFFFFF)),
+          border: Border.all(color: guestBorder),
         ),
         child: Column(
           children: [
-            const Text(
-              'جهت استفاده از خدمات هوشمند، وارد حساب خود شوید.',
-              style: TextStyle(fontSize: 13, color: Color(0xFFA0A0B0)),
+            Text(
+              guestText,
+              style: const TextStyle(fontSize: 13, color: Color(0xFFA0A0B0)),
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: 12),
             OutlinedButton.icon(
               onPressed: _showAuthModal,
               icon: const Icon(Icons.login, size: 16, color: Color(0xFFFF3B5C)),
-              label: const Text('ورود سریع یا ایجاد حساب', style: TextStyle(color: Colors.white, fontSize: 12.5, fontWeight: FontWeight.w700)),
+              label: Text(guestBtnText, style: const TextStyle(color: Colors.white, fontSize: 12.5, fontWeight: FontWeight.w700)),
               style: OutlinedButton.styleFrom(
                 side: const BorderSide(color: Color(0xFFFF3B5C)),
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
@@ -772,74 +850,122 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
     }
 
     final tier = (_userData?['plan_tier'] ?? 'PRO').toString().toUpperCase();
-    final remaining = _userData?['remaining_text'] ?? 'در حال بررسی...';
     final isExpired = _userData?['is_expired'] == true;
+    final isTrial = _userData?['is_trial'] == true;
+    final rawRemaining = (_userData?['remaining_text'] ?? '').toString().trim();
+    final remaining = rawRemaining.isNotEmpty
+        ? rawRemaining
+        : (sc['checking_remaining_text'] ?? 'در حال بررسی...').toString();
+
+    String statusTitleRaw;
+    if (isExpired) {
+      statusTitleRaw = (sc['expired_title'] ?? 'اشتراک به اتمام رسیده').toString();
+    } else if (isTrial) {
+      statusTitleRaw = (sc['trial_title'] ?? 'دوره تست فعال').toString();
+    } else {
+      statusTitleRaw = (sc['active_title'] ?? 'سرویس فعال').toString();
+    }
+    final statusTitle = resolveStorefrontTemplate(statusTitleRaw, userToken: _userToken, userData: _userData);
+
+    final subTpl = (sc['subtitle_template'] ?? '').toString().trim();
+    final subtitleText = (subTpl.isNotEmpty && rawRemaining.isNotEmpty)
+        ? resolveStorefrontTemplate(subTpl, userToken: _userToken, userData: _userData)
+        : remaining;
+
+    String btnTextRaw;
+    if (isExpired) {
+      btnTextRaw = (sc['btn_expired_text'] ?? 'خرید اشتراک').toString();
+    } else if (isTrial) {
+      btnTextRaw = (sc['btn_active_trial_text'] ?? 'خرید اشتراک').toString();
+    } else if (tier.toLowerCase() == 'pro') {
+      btnTextRaw = (sc['btn_active_pro_text'] ?? 'تمدید اشتراک').toString();
+    } else {
+      btnTextRaw = (sc['btn_active_plus_text'] ?? 'تمدید یا ارتقا').toString();
+    }
+    final btnText = resolveStorefrontTemplate(btnTextRaw, userToken: _userToken, userData: _userData);
+
+    final activeBorder = parseHexColor(sc['active_border_color'], const Color(0x3300E676));
+    final expiredBorder = parseHexColor(sc['expired_border_color'], const Color(0x4DFF3B5C));
+    final activeColor = parseHexColor(sc['active_accent_color'], const Color(0xFF00E676));
+    final expiredColor = parseHexColor(sc['expired_accent_color'], const Color(0xFFFF3B5C));
+    final badgePrefix = (sc['tier_badge_prefix'] ?? '').toString();
 
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
-        color: const Color(0xFF0E0E14),
+        color: cardBg,
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: isExpired ? const Color(0x4DFF3B5C) : const Color(0x3300E676)),
+        border: Border.all(color: isExpired ? expiredBorder : activeBorder),
       ),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                    decoration: BoxDecoration(
-                      color: isExpired ? const Color(0x1AFF3B5C) : const Color(0x1A00E676),
-                      borderRadius: BorderRadius.circular(6),
-                      border: Border.all(color: isExpired ? const Color(0xFFFF3B5C) : const Color(0xFF00E676)),
-                    ),
-                    child: Text(
-                      tier.toUpperCase(),
-                      style: TextStyle(
-                        fontFamily: 'Syne',
-                        fontSize: 11,
-                        fontWeight: FontWeight.w800,
-                        color: isExpired ? const Color(0xFFFF3B5C) : const Color(0xFF00E676),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                      decoration: BoxDecoration(
+                        color: (isExpired ? expiredColor : activeColor).withOpacity(0.10),
+                        borderRadius: BorderRadius.circular(6),
+                        border: Border.all(color: isExpired ? expiredColor : activeColor),
+                      ),
+                      child: Text(
+                        '$badgePrefix${tier.toUpperCase()}',
+                        style: TextStyle(
+                          fontFamily: 'Syne',
+                          fontSize: 11,
+                          fontWeight: FontWeight.w800,
+                          color: isExpired ? expiredColor : activeColor,
+                        ),
                       ),
                     ),
-                  ),
-                  const SizedBox(width: 8),
-                  Text(
-                    isExpired ? 'اشتراک به اتمام رسیده' : 'سرویس فعال',
-                    style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: Colors.white),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 6),
-              Text(
-                remaining,
-                style: TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
-                  color: isExpired ? const Color(0xFFFF3B5C) : const Color(0xFFA0A0B0),
+                    const SizedBox(width: 8),
+                    Flexible(
+                      child: Text(
+                        statusTitle,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: Colors.white),
+                      ),
+                    ),
+                  ],
                 ),
-              ),
-            ],
+                const SizedBox(height: 6),
+                Text(
+                  subtitleText,
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: isExpired ? expiredColor : const Color(0xFFA0A0B0),
+                  ),
+                ),
+              ],
+            ),
           ),
+          const SizedBox(width: 10),
           ElevatedButton(
-            onPressed: () => setState(() => _currentNavIndex = 1),
+            onPressed: () {
+              final tapFbRaw = sc['btn_tap_feedback'];
+              if (tapFbRaw != null && tapFbRaw.toString().trim().isNotEmpty) {
+                _showStorefrontFeedbackKey('sub_card_btn', overrideRaw: tapFbRaw);
+                return;
+              }
+              setState(() => _currentNavIndex = 1);
+            },
             style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0x1AFF3B5C),
-              foregroundColor: const Color(0xFFFF3B5C),
-              side: const BorderSide(color: Color(0xFFFF3B5C)),
+              backgroundColor: parseHexColor(sc['btn_bg_color'], const Color(0x1AFF3B5C)),
+              foregroundColor: parseHexColor(sc['btn_text_color'], const Color(0xFFFF3B5C)),
+              side: BorderSide(color: parseHexColor(sc['btn_border_color'], const Color(0xFFFF3B5C))),
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
               elevation: 0,
             ),
             child: Text(
-              isExpired
-                  ? 'خرید اشتراک'
-                  : (tier.toLowerCase() == 'pro' ? 'تمدید اشتراک' : 'تمدید یا ارتقا'),
+              btnText,
               style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
             ),
           ),
@@ -1292,32 +1418,42 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
       await _refreshUserProfile();
     }
 
+    final ruleRes = evaluateStorefrontSubscriptionRule(
+      storefrontConfig: _storefrontConfig,
+      option: option,
+      planBlock: planBlock,
+      userData: _userData,
+    );
+    if (ruleRes.action == 'block') {
+      if (!mounted) return;
+      await showServerFeedback(
+        context,
+        ruleRes.feedback,
+        onToast: _showToast,
+        onAction: _dispatchStorefrontAction,
+      );
+      return;
+    }
+    if (ruleRes.action == 'upgrade') {
+      final fbMsg = (ruleRes.feedback['message'] ?? '').toString().trim();
+      final fbMode = (ruleRes.feedback['mode'] ?? 'silent').toString().trim().toLowerCase();
+      if (fbMode != 'silent' && fbMsg.isNotEmpty) {
+        if (!mounted) return;
+        await showServerFeedback(
+          context,
+          ruleRes.feedback,
+          onToast: _showToast,
+          onAction: _dispatchStorefrontAction,
+        );
+        return;
+      }
+      await _handleUpgradePlan();
+      return;
+    }
+
     final packageKey = (option['package_key'] ?? '').toString().trim();
     final tier = (planBlock['tier'] ?? option['tier'] ?? 'pro').toString().trim().toLowerCase();
-    final accessTier = (option['access_tier'] ?? planBlock['access_tier'] ?? (tier == 'plus' ? 'plus' : 'pro')).toString().trim().toLowerCase();
     final months = (option['months'] as num?)?.toInt() ?? 1;
-    final allowDowngrade = option['allow_downgrade'] == true;
-    final requireUpgradeFromPlus = option['require_upgrade_from_plus'] != false;
-
-    if (_userData != null) {
-      final userTier = (_userData!['plan_tier'] ?? '').toString().toLowerCase();
-      final isExpired = _userData!['is_expired'] == true;
-      final isTrial = _userData!['is_trial'] == true;
-
-      if (!isExpired && !isTrial) {
-        if (userTier == 'pro' && accessTier == 'plus' && !allowDowngrade) {
-          _showToast('اشتراک فعال شما PRO است و امکان تمدید یا تغییر به پلن پایین‌تر (Plus) وجود ندارد.');
-          return;
-        }
-        final upForTiers = (planBlock['upgrade_for_tiers'] is List)
-            ? (planBlock['upgrade_for_tiers'] as List).map((e) => e.toString().trim().toLowerCase()).toList()
-            : <String>[];
-        if (userTier == 'plus' && upForTiers.contains('plus') && requireUpgradeFromPlus) {
-          _handleUpgradePlan();
-          return;
-        }
-      }
-    }
 
     int baseAmount = 0;
     int feeAmount = 0;
@@ -1326,6 +1462,7 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
     String planTitle = (option['short_title'] ?? planBlock['short_title'] ?? 'Ryzer ${tier.toUpperCase()}').toString();
 
     final quote = await ApiService.getPaymentQuote(
+      token: _userToken,
       packageKey: packageKey,
       tier: tier,
       months: months,
@@ -1342,13 +1479,19 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
       feeAmount = (option['fee'] as num?)?.toInt() ?? 0;
       totalAmount = (option['total'] as num).toInt();
     } else {
-      _showToast(quote['detail']?.toString() ?? 'خطا در استعلام قیمت از سرور. لطفاً دوباره تلاش فرمایید.');
+      await _showStorefrontFeedbackKey(
+        'quote_failed',
+        overrideRaw: quote['detail']?.toString(),
+        fallbackText: 'خطا در استعلام قیمت از سرور. لطفاً دوباره تلاش فرمایید.',
+      );
       return;
     }
 
-    final baseFormatted = formatTomanComma(baseAmount);
-    final feeFormatted = formatTomanComma(feeAmount);
-    final totalFormatted = formatTomanComma(totalAmount);
+    final pageMap = _storefrontConfig['page'];
+    final currencyLabel = (pageMap is Map ? (pageMap['currency_label'] ?? 'تومان') : 'تومان').toString();
+    final baseFormatted = formatTomanComma(baseAmount, currencyLabel: currencyLabel);
+    final feeFormatted = formatTomanComma(feeAmount, currencyLabel: currencyLabel);
+    final totalFormatted = formatTomanComma(totalAmount, currencyLabel: currencyLabel);
 
     final rawPre = _storefrontConfig['pre_invoice'];
     final preCfg = rawPre is Map<String, dynamic>
@@ -1368,7 +1511,12 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
     if (confirm != true) return;
 
     try {
-      _showToast((preCfg['redirecting_toast'] ?? 'در حال انتقال به درگاه پرداخت...').toString());
+      final redirRaw = preCfg['redirecting_toast'];
+      if (redirRaw != null && redirRaw.toString().trim().isNotEmpty) {
+        _showToast(redirRaw.toString());
+      } else {
+        await _showStorefrontFeedbackKey('payment_redirecting', fallbackText: 'در حال انتقال به درگاه پرداخت...');
+      }
       final res = await ApiService.requestPayment(
         token: _userToken!,
         packageKey: packageKey,
@@ -1380,10 +1528,14 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
       if (res['success'] == true && res['payment_url'] != null) {
         await _launchExternalUrl(res['payment_url'].toString());
       } else {
-        _showToast(res['message'] ?? 'خطا در ارتباط با درگاه پرداخت.');
+        await _showStorefrontFeedbackKey(
+          'payment_request_failed',
+          overrideRaw: res['message']?.toString(),
+          fallbackText: 'خطا در ارتباط با درگاه پرداخت.',
+        );
       }
     } catch (e) {
-      _showToast('خطا در ایجاد درخواست پرداخت.');
+      await _showStorefrontFeedbackKey('payment_request_failed', fallbackText: 'خطا در ایجاد درخواست پرداخت.');
     }
   }
 
@@ -1401,6 +1553,16 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
     final upCfg = rawUpCfg is Map<String, dynamic>
         ? rawUpCfg
         : (rawUpCfg is Map ? Map<String, dynamic>.from(rawUpCfg) : <String, dynamic>{});
+
+    if (upCfg['enabled'] == false) {
+      await _showStorefrontFeedbackKey(
+        'upgrade_disabled',
+        overrideRaw: upCfg['disabled_feedback'] ?? upCfg['disabled_message'],
+        fallbackText: 'ارتقای اشتراک در حال حاضر غیرفعال است.',
+      );
+      return;
+    }
+
     final fromTiers = (upCfg['from_tiers'] is List)
         ? (upCfg['from_tiers'] as List).map((e) => e.toString().trim().toLowerCase()).toList()
         : <String>['plus'];
@@ -1410,12 +1572,15 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
     final isTrial = _userData?['is_trial'] == true;
 
     if (userTier == 'pro' && !isExpired && !isTrial) {
-      _showToast('اشتراک فعال شما از قبل PRO است.');
+      await _showStorefrontFeedbackKey('upgrade_already_pro', fallbackText: 'اشتراک فعال شما از قبل PRO است.');
       return;
     }
 
     if (!fromTiers.contains(userTier) || isExpired || isTrial) {
-      _showToast('امکان ارتقا فقط برای کاربران دارای اشتراک فعال Plus امکان‌پذیر است.');
+      await _showStorefrontFeedbackKey(
+        'upgrade_only_plus',
+        fallbackText: 'امکان ارتقا فقط برای کاربران دارای اشتراک فعال Plus امکان‌پذیر است.',
+      );
       return;
     }
 
@@ -1424,11 +1589,20 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
         ? rawUpi
         : (rawUpi is Map ? Map<String, dynamic>.from(rawUpi) : <String, dynamic>{});
 
-    _showToast((upiCfg['calculating_toast'] ?? 'در حال محاسبه مابه‌التفاوت ارتقا...').toString());
+    final calcRaw = upiCfg['calculating_toast'];
+    if (calcRaw != null && calcRaw.toString().trim().isNotEmpty) {
+      _showToast(calcRaw.toString());
+    } else {
+      await _showStorefrontFeedbackKey('upgrade_calculating', fallbackText: 'در حال محاسبه مابه‌التفاوت ارتقا...');
+    }
 
     final quote = await ApiService.getUpgradeQuote(_userToken!);
     if (quote['ok'] != true) {
-      _showToast(quote['detail']?.toString() ?? 'خطا در محاسبه هزینه ارتقا.');
+      await _showStorefrontFeedbackKey(
+        'upgrade_quote_failed',
+        overrideRaw: quote['detail']?.toString(),
+        fallbackText: 'خطا در محاسبه هزینه ارتقا.',
+      );
       return;
     }
 
@@ -1439,6 +1613,9 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
     final fromTitle = quote['from_title']?.toString() ?? (upCfg['from_title']?.toString() ?? 'Ryzer Plus');
     final toTitle = quote['to_title']?.toString() ?? (upCfg['to_title']?.toString() ?? 'Ryzer Pro');
 
+    final pageMap = _storefrontConfig['page'];
+    final currencyLabel = (pageMap is Map ? (pageMap['currency_label'] ?? 'تومان') : 'تومان').toString();
+
     if (!mounted) return;
     final confirm = await showServerUpgradeInvoiceDialog(
       context: context,
@@ -1446,15 +1623,20 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
       fromPlan: fromTitle,
       toPlan: toTitle,
       remainingDays: remainingDays,
-      baseFormatted: formatTomanComma(baseAmount),
-      feeFormatted: formatTomanComma(feeAmount),
-      totalFormatted: formatTomanComma(totalAmount),
+      baseFormatted: formatTomanComma(baseAmount, currencyLabel: currencyLabel),
+      feeFormatted: formatTomanComma(feeAmount, currencyLabel: currencyLabel),
+      totalFormatted: formatTomanComma(totalAmount, currencyLabel: currencyLabel),
     );
 
     if (confirm != true) return;
 
     try {
-      _showToast((upiCfg['redirecting_toast'] ?? 'در حال انتقال به درگاه پرداخت...').toString());
+      final redirRaw = upiCfg['redirecting_toast'];
+      if (redirRaw != null && redirRaw.toString().trim().isNotEmpty) {
+        _showToast(redirRaw.toString());
+      } else {
+        await _showStorefrontFeedbackKey('payment_redirecting', fallbackText: 'در حال انتقال به درگاه پرداخت...');
+      }
       final res = await ApiService.requestUpgradePayment(
         token: _userToken!,
         source: 'app',
@@ -1463,10 +1645,14 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
       if (res['success'] == true && res['payment_url'] != null) {
         await _launchExternalUrl(res['payment_url'].toString());
       } else {
-        _showToast(res['message'] ?? 'خطا در ارتباط با درگاه پرداخت.');
+        await _showStorefrontFeedbackKey(
+          'upgrade_failed',
+          overrideRaw: res['message']?.toString(),
+          fallbackText: 'خطا در ارتباط با درگاه پرداخت.',
+        );
       }
     } catch (e) {
-      _showToast('خطا در ایجاد درخواست ارتقا.');
+      await _showStorefrontFeedbackKey('upgrade_failed', fallbackText: 'خطا در ایجاد درخواست ارتقا.');
     }
   }
 
@@ -2418,11 +2604,11 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
         unselectedItemColor: const Color(0x66FFFFFF),
         selectedLabelStyle: const TextStyle(fontWeight: FontWeight.w800, fontSize: 11),
         unselectedLabelStyle: const TextStyle(fontSize: 11),
-        items: const [
-          BottomNavigationBarItem(icon: Icon(Icons.bolt), label: 'اتصال'),
-          BottomNavigationBarItem(icon: Icon(Icons.shopping_bag_outlined), label: 'پلن‌ها'),
-          BottomNavigationBarItem(icon: Icon(Icons.support_agent_outlined), label: 'پشتیبانی'),
-          BottomNavigationBarItem(icon: Icon(Icons.settings_outlined), label: 'تنظیمات'),
+        items: [
+          BottomNavigationBarItem(icon: const Icon(Icons.bolt), label: (_uiConfig['nav_tab0_label'] ?? 'اتصال').toString()),
+          BottomNavigationBarItem(icon: const Icon(Icons.shopping_bag_outlined), label: (_uiConfig['nav_tab1_label'] ?? 'پلن‌ها').toString()),
+          BottomNavigationBarItem(icon: const Icon(Icons.support_agent_outlined), label: (_uiConfig['nav_tab2_label'] ?? 'پشتیبانی').toString()),
+          BottomNavigationBarItem(icon: const Icon(Icons.settings_outlined), label: (_uiConfig['nav_tab3_label'] ?? 'تنظیمات').toString()),
         ],
       ),
     );
