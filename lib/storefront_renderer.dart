@@ -229,29 +229,405 @@ IconData resolveStorefrontIcon(String? name) {
   }
 }
 
-String formatTomanComma(num n) {
+String formatTomanComma(num n, {String currencyLabel = 'تومان'}) {
   final str = n.toInt().toString().replaceAllMapped(
         RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'),
         (Match m) => '${m[1]},',
       );
-  return '$str تومان';
+  final cur = currencyLabel.trim().isNotEmpty ? currencyLabel.trim() : 'تومان';
+  return '$str $cur';
+}
+
+String formatStorefrontText(String raw, Map<String, dynamic> vars) {
+  if (!raw.contains('{') || vars.isEmpty) return raw;
+  var out = raw;
+  vars.forEach((k, v) {
+    out = out.replaceAll('{$k}', (v ?? '').toString());
+  });
+  return out;
 }
 
 String resolveStorefrontTemplate(
   String raw, {
   required String? userToken,
   required Map<String, dynamic>? userData,
+  Map<String, dynamic>? extraVars,
 }) {
   if (!raw.contains('{')) return raw;
   final tier = (userData?['plan_tier'] ?? 'PRO').toString().toUpperCase();
   final remaining = (userData?['remaining_text'] ?? 'نامشخص').toString();
   final username = (userData?['username'] ?? userData?['display_name'] ?? 'کاربر').toString();
   final daysLeft = (userData?['days_left'] ?? 0).toString();
-  return raw
+  final expiresAt = (userData?['plan_expires_at'] ?? '').toString();
+  final email = (userData?['email'] ?? '').toString();
+  var out = raw
       .replaceAll('{tier}', tier)
       .replaceAll('{remaining}', remaining)
       .replaceAll('{username}', username)
-      .replaceAll('{days_left}', daysLeft);
+      .replaceAll('{days_left}', daysLeft)
+      .replaceAll('{expires_at}', expiresAt)
+      .replaceAll('{email}', email);
+  if (extraVars != null && extraVars.isNotEmpty) {
+    out = formatStorefrontText(out, extraVars);
+  }
+  return out;
+}
+
+Map<String, dynamic> resolveStorefrontFeedback(
+  dynamic raw,
+  Map<String, dynamic> messages, {
+  String? fallbackKey,
+  String? fallbackText,
+  Map<String, dynamic>? vars,
+}) {
+  dynamic source = raw;
+  if (source == null && fallbackKey != null && fallbackKey.isNotEmpty && messages.containsKey(fallbackKey)) {
+    source = messages[fallbackKey];
+  }
+  if (source is String) {
+    final msg = source.trim().isNotEmpty ? source : (fallbackText ?? '');
+    final formatted = vars != null ? formatStorefrontText(msg, vars) : msg;
+    return {
+      'mode': formatted.isEmpty ? 'silent' : 'toast',
+      'message': formatted,
+    };
+  }
+  if (source is Map) {
+    final map = Map<String, dynamic>.from(source);
+    var msg = (map['message'] ?? map['text'] ?? map['body'] ?? '').toString();
+    if (msg.trim().isEmpty) {
+      final fk = (map['feedback_key'] ?? '').toString().trim();
+      if (fk.isNotEmpty && messages.containsKey(fk)) {
+        return resolveStorefrontFeedback(
+          messages[fk],
+          messages,
+          fallbackKey: fallbackKey,
+          fallbackText: fallbackText,
+          vars: vars,
+        );
+      }
+      if (map['feedback'] != null) {
+        return resolveStorefrontFeedback(
+          map['feedback'],
+          messages,
+          fallbackKey: fallbackKey,
+          fallbackText: fallbackText,
+          vars: vars,
+        );
+      }
+      msg = fallbackText ?? '';
+    }
+    var title = (map['title'] ?? '').toString();
+    var closeBtn = (map['close_btn_text'] ?? 'متوجه شدم').toString();
+    if (vars != null && vars.isNotEmpty) {
+      msg = formatStorefrontText(msg, vars);
+      if (title.isNotEmpty) title = formatStorefrontText(title, vars);
+      if (closeBtn.isNotEmpty) closeBtn = formatStorefrontText(closeBtn, vars);
+    }
+    final mode = (map['mode'] ?? ((title.isNotEmpty || map['action_btn'] != null) ? 'dialog' : (msg.trim().isEmpty ? 'silent' : 'toast'))).toString().trim().toLowerCase();
+    final out = Map<String, dynamic>.from(map);
+    out['mode'] = mode;
+    out['message'] = msg;
+    out['title'] = title;
+    out['close_btn_text'] = closeBtn;
+    return out;
+  }
+  final fbTxt = fallbackText ?? '';
+  final formatted = vars != null ? formatStorefrontText(fbTxt, vars) : fbTxt;
+  return {
+    'mode': formatted.isEmpty ? 'silent' : 'toast',
+    'message': formatted,
+  };
+}
+
+Future<void> showServerFeedback(
+  BuildContext context,
+  Map<String, dynamic> feedback, {
+  required void Function(String) onToast,
+  Future<void> Function(Map<String, dynamic>)? onAction,
+}) async {
+  final mode = (feedback['mode'] ?? 'toast').toString().trim().toLowerCase();
+  final message = (feedback['message'] ?? '').toString();
+  final title = (feedback['title'] ?? '').toString();
+  if (mode == 'silent' || (message.trim().isEmpty && title.trim().isEmpty)) {
+    return;
+  }
+  if (mode != 'dialog') {
+    onToast(message.isNotEmpty ? message : title);
+    return;
+  }
+
+  final dlgBg = parseHexColor(feedback['dialog_bg_color'], const Color(0xFF0E0E14));
+  final dlgBorder = parseHexColor(feedback['border_color'], const Color(0x4DFF3B5C));
+  final iconName = (feedback['icon'] ?? 'info').toString().trim();
+  final iconColor = parseHexColor(feedback['icon_color'], const Color(0xFFFFAB00));
+  final iconBg = parseHexColor(feedback['icon_bg_color'], const Color(0x1AFFAB00));
+  final titleColor = parseHexColor(feedback['title_color'], Colors.white);
+  final msgColor = parseHexColor(feedback['message_color'], const Color(0xFFD0D0E0));
+  final closeText = (feedback['close_btn_text'] ?? 'متوجه شدم').toString();
+  final closeColor = parseHexColor(feedback['close_btn_color'], const Color(0xFFA0A0B0));
+  final actionBtn = _sfMap(feedback['action_btn']);
+  final actionText = (actionBtn['text'] ?? actionBtn['label'] ?? '').toString().trim();
+
+  await showDialog<void>(
+    context: context,
+    builder: (ctx) => Directionality(
+      textDirection: TextDirection.rtl,
+      child: AlertDialog(
+        backgroundColor: dlgBg,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+          side: BorderSide(color: dlgBorder, width: 1.2),
+        ),
+        title: Row(
+          children: [
+            if (iconName.isNotEmpty) ...[
+              Container(
+                padding: const EdgeInsets.all(7),
+                decoration: BoxDecoration(
+                  color: iconBg,
+                  borderRadius: BorderRadius.circular(9),
+                ),
+                child: Icon(resolveStorefrontIcon(iconName), color: iconColor, size: 20),
+              ),
+              const SizedBox(width: 10),
+            ],
+            Expanded(
+              child: Text(
+                title.isNotEmpty ? title : 'توجه',
+                style: TextStyle(fontSize: 14.5, fontWeight: FontWeight.w800, color: titleColor),
+              ),
+            ),
+          ],
+        ),
+        content: Text(
+          message,
+          style: TextStyle(fontSize: 12.8, color: msgColor, height: 1.65),
+        ),
+        actionsPadding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
+        actions: [
+          if (actionText.isNotEmpty && onAction != null) ...[
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: Text(closeText, style: TextStyle(color: closeColor, fontSize: 12.5, fontWeight: FontWeight.w700)),
+            ),
+            ElevatedButton(
+              onPressed: () async {
+                Navigator.pop(ctx);
+                await onAction(actionBtn);
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: parseHexColor(actionBtn['bg_color'], const Color(0xFFFF3B5C)),
+                foregroundColor: parseHexColor(actionBtn['text_color'], Colors.white),
+                elevation: 0,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(9)),
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              ),
+              child: Text(actionText, style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w800)),
+            ),
+          ] else
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton(
+                onPressed: () => Navigator.pop(ctx),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: parseHexColor(feedback['close_btn_bg_color'], const Color(0xFF1A1A28)),
+                  foregroundColor: parseHexColor(feedback['close_btn_text_color'], Colors.white),
+                  elevation: 0,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10),
+                    side: BorderSide(color: dlgBorder.withOpacity(0.5)),
+                  ),
+                  padding: const EdgeInsets.symmetric(vertical: 11),
+                ),
+                child: Text(closeText, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w800)),
+              ),
+            ),
+        ],
+      ),
+    ),
+  );
+}
+
+class StorefrontRuleResult {
+  final String action; // 'allow' | 'block' | 'upgrade'
+  final Map<String, dynamic> feedback;
+  const StorefrontRuleResult({required this.action, required this.feedback});
+}
+
+bool _sfRuleMatches(
+  Map<String, dynamic> rule, {
+  required String userState,
+  required String userTier,
+  required String targetTier,
+  required String accessTier,
+  required String packageKey,
+}) {
+  List<String> _normList(dynamic raw) {
+    if (raw is List) {
+      final res = raw.map((e) => e.toString().trim().toLowerCase()).where((e) => e.isNotEmpty).toList();
+      return res.isEmpty ? ['all'] : res;
+    }
+    return ['all'];
+  }
+
+  final uStates = _normList(rule['user_states']);
+  if (!uStates.contains('all') && !uStates.contains(userState)) return false;
+
+  final uTiers = _normList(rule['user_tiers']);
+  if (!uTiers.contains('all') && !uTiers.contains(userTier)) return false;
+
+  final tTiers = _normList(rule['target_tiers']);
+  if (!tTiers.contains('all') && !tTiers.contains(targetTier) && !tTiers.contains(accessTier)) return false;
+
+  final aTiers = _normList(rule['target_access_tiers']);
+  if (!aTiers.contains('all') && !aTiers.contains(accessTier)) return false;
+
+  final pKeys = _normList(rule['package_keys']);
+  if (!pKeys.contains('all') && !pKeys.contains(packageKey)) return false;
+
+  return true;
+}
+
+StorefrontRuleResult evaluateStorefrontSubscriptionRule({
+  required Map<String, dynamic> storefrontConfig,
+  required Map<String, dynamic> option,
+  required Map<String, dynamic> planBlock,
+  required Map<String, dynamic>? userData,
+}) {
+  final messages = _sfMap(storefrontConfig['messages']);
+  final globalRules = _sfMap(storefrontConfig['subscription_rules']);
+  final optRules = _sfMap(option['rules']);
+  final blkRules = _sfMap(planBlock['rules']);
+
+  final enabled = _sfBool(option['enabled'], true);
+  final targetTier = (planBlock['tier'] ?? option['tier'] ?? 'pro').toString().trim().toLowerCase();
+  final accessTier = (option['access_tier'] ?? planBlock['access_tier'] ?? (targetTier == 'plus' ? 'plus' : 'pro')).toString().trim().toLowerCase();
+  final months = _sfInt(option['months'], 1);
+  final rawPk = (option['package_key'] ?? '').toString().trim().toLowerCase();
+  final packageKey = rawPk.isNotEmpty ? rawPk : '${targetTier}_${months}m';
+  final planTitle = (option['invoice_title'] ?? option['short_title'] ?? planBlock['short_title'] ?? planBlock['title'] ?? '').toString();
+
+  final vars = <String, dynamic>{
+    'tier': (userData?['plan_tier'] ?? '').toString().toUpperCase(),
+    'remaining': (userData?['remaining_text'] ?? '').toString(),
+    'username': (userData?['username'] ?? userData?['display_name'] ?? 'کاربر').toString(),
+    'target_tier': accessTier.toUpperCase(),
+    'plan_title': planTitle,
+  };
+
+  if (!enabled) {
+    final rawFb = option['disabled_feedback'] ??
+        ((option['disabled_message'] ?? '').toString().trim().isNotEmpty ? option['disabled_message'] : null);
+    final fb = resolveStorefrontFeedback(
+      rawFb,
+      messages,
+      fallbackKey: 'option_disabled',
+      fallbackText: 'این بسته در حال حاضر غیرفعال است.',
+      vars: vars,
+    );
+    return StorefrontRuleResult(action: 'block', feedback: fb);
+  }
+
+  if (userData == null) {
+    return const StorefrontRuleResult(action: 'allow', feedback: {'mode': 'silent', 'message': ''});
+  }
+
+  final isExpired = userData['is_expired'] == true;
+  final isTrial = userData['is_trial'] == true;
+  final userState = isExpired ? 'expired' : (isTrial ? 'trial' : 'active_paid');
+  final userTier = (userData['plan_tier'] ?? '').toString().trim().toLowerCase();
+
+  String namedSlot = '';
+  String defaultMsgKey = 'same_tier_blocked';
+  String defaultMsgText = 'در وضعیت فعلی امکان خرید این پلن وجود ندارد.';
+  if (userState == 'trial') {
+    namedSlot = 'trial_purchase';
+    defaultMsgKey = 'trial_purchase_blocked';
+    defaultMsgText = 'در دوره تست امکان خرید این پلن وجود ندارد.';
+  } else if (userState == 'expired') {
+    namedSlot = 'expired_purchase';
+    defaultMsgKey = 'expired_purchase_blocked';
+    defaultMsgText = 'در وضعیت فعلی امکان خرید این پلن وجود ندارد.';
+  } else {
+    if (userTier == 'pro' && accessTier == 'plus') {
+      namedSlot = 'pro_to_plus';
+      defaultMsgKey = 'downgrade_blocked';
+      defaultMsgText = 'اشتراک فعال شما PRO است و امکان تمدید یا تغییر به پلن پایین‌تر (Plus) وجود ندارد.';
+    } else if (userTier == 'plus' && accessTier == 'pro') {
+      namedSlot = 'plus_to_pro';
+      defaultMsgKey = 'plus_to_pro_blocked';
+      defaultMsgText = 'امکان خرید بسته PRO برای اشتراک فعال PLUS وجود ندارد؛ جهت ارتقا لطفاً از طریق پنل کاربری وب‌سایت اقدام فرمایید.';
+    } else if (userTier == 'pro' && accessTier == 'pro') {
+      namedSlot = 'pro_to_pro';
+      defaultMsgKey = 'same_tier_blocked';
+    } else if (userTier == 'plus' && accessTier == 'plus') {
+      namedSlot = 'plus_to_plus';
+      defaultMsgKey = 'same_tier_blocked';
+    }
+  }
+
+  StorefrontRuleResult _fromRuleMap(Map<String, dynamic> r) {
+    final act = (r['action'] ?? 'allow').toString().trim().toLowerCase();
+    if (act == 'block' || act == 'upgrade') {
+      final rawFb = r['feedback'] ?? r['message'];
+      final fk = (r['feedback_key'] ?? defaultMsgKey).toString().trim();
+      final fb = resolveStorefrontFeedback(
+        rawFb,
+        messages,
+        fallbackKey: fk.isNotEmpty ? fk : defaultMsgKey,
+        fallbackText: defaultMsgText,
+        vars: vars,
+      );
+      return StorefrontRuleResult(action: act, feedback: fb);
+    }
+    return const StorefrontRuleResult(action: 'allow', feedback: {'mode': 'silent', 'message': ''});
+  }
+
+  for (final scope in [optRules, blkRules]) {
+    for (final rawCr in _sfList(scope['custom_rules'])) {
+      final cr = _sfMap(rawCr);
+      if (cr.isNotEmpty &&
+          _sfRuleMatches(cr, userState: userState, userTier: userTier, targetTier: targetTier, accessTier: accessTier, packageKey: packageKey)) {
+        return _fromRuleMap(cr);
+      }
+    }
+    if (namedSlot.isNotEmpty) {
+      final sr = _sfMap(scope[namedSlot]);
+      if (sr.isNotEmpty) return _fromRuleMap(sr);
+    }
+  }
+
+  for (final rawCr in _sfList(globalRules['custom_rules'])) {
+    final cr = _sfMap(rawCr);
+    if (cr.isNotEmpty &&
+        _sfRuleMatches(cr, userState: userState, userTier: userTier, targetTier: targetTier, accessTier: accessTier, packageKey: packageKey)) {
+      return _fromRuleMap(cr);
+    }
+  }
+
+  if (namedSlot == 'pro_to_plus' && option['allow_downgrade'] == true) {
+    return const StorefrontRuleResult(action: 'allow', feedback: {'mode': 'silent', 'message': ''});
+  }
+
+  if (namedSlot.isNotEmpty) {
+    final sr = _sfMap(globalRules[namedSlot]);
+    if (sr.isNotEmpty) return _fromRuleMap(sr);
+  }
+
+  if (namedSlot == 'pro_to_plus') {
+    return StorefrontRuleResult(
+      action: 'block',
+      feedback: resolveStorefrontFeedback(null, messages, fallbackKey: 'downgrade_blocked', fallbackText: defaultMsgText, vars: vars),
+    );
+  }
+  final upForTiers = _sfList(planBlock['upgrade_for_tiers']).map((e) => e.toString().trim().toLowerCase()).toList();
+  final requireUpgradeFromPlus = option['require_upgrade_from_plus'] != false;
+  if (namedSlot == 'plus_to_pro' && upForTiers.contains('plus') && requireUpgradeFromPlus) {
+    return const StorefrontRuleResult(action: 'upgrade', feedback: {'mode': 'silent', 'message': ''});
+  }
+
+  return const StorefrontRuleResult(action: 'allow', feedback: {'mode': 'silent', 'message': ''});
 }
 
 bool isStorefrontBlockVisible(
@@ -374,55 +750,63 @@ class StorefrontPlansView extends StatelessWidget {
         ? _sfMap(remoteConfig['storefront'])
         : _sfMap(_sfMap(remoteConfig['ui_config'])['storefront']);
 
-    if (sf.isEmpty) {
-      return Center(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              if (isLoadingConfig) ...[
-                const CircularProgressIndicator(color: Color(0xFFFF3B5C)),
-                const SizedBox(height: 16),
-                const Text(
-                  'در حال دریافت اطلاعات پلن‌ها و ظاهر فروشگاه از سرور...',
-                  style: TextStyle(fontSize: 13, color: Color(0xFFA0A0B0)),
-                  textAlign: TextAlign.center,
-                ),
-              ] else ...[
-                const Icon(Icons.cloud_off_rounded, size: 46, color: Color(0xFFA0A0B0)),
-                const SizedBox(height: 12),
-                const Text(
-                  'عدم دریافت اطلاعات فروشگاه از سرور',
-                  style: TextStyle(fontSize: 14, fontWeight: FontWeight.w800, color: Colors.white),
-                  textAlign: TextAlign.center,
-                ),
-                const SizedBox(height: 8),
-                const Text(
-                  'لطفاً اتصال اینترنت خود را بررسی کرده و مجدداً تلاش فرمایید.',
-                  style: TextStyle(fontSize: 12, color: Color(0xFFA0A0B0)),
-                  textAlign: TextAlign.center,
-                ),
-                const SizedBox(height: 16),
-                ElevatedButton.icon(
-                  onPressed: onRefresh,
-                  icon: const Icon(Icons.refresh_rounded, size: 18),
-                  label: const Text('تلاش مجدد', style: TextStyle(fontWeight: FontWeight.w800)),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFFFF3B5C),
-                    foregroundColor: Colors.white,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+    final page = _sfMap(sf['page']);
+    final messages = _sfMap(sf['messages']);
+    final loadingText = (page['loading_text'] ?? 'در حال دریافت اطلاعات پلن‌ها و ظاهر فروشگاه از سرور...').toString();
+    final errTitle = (page['error_title'] ?? 'عدم دریافت اطلاعات فروشگاه از سرور').toString();
+    final errSub = (page['error_subtitle'] ?? 'لطفاً اتصال اینترنت خود را بررسی کرده و مجدداً تلاش فرمایید.').toString();
+    final errRetry = (page['error_retry_btn'] ?? 'تلاش مجدد').toString();
+
+    if (sf.isEmpty || _sfList(sf['blocks']).isEmpty && isLoadingConfig) {
+      if (sf.isEmpty) {
+        return Center(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                if (isLoadingConfig) ...[
+                  const CircularProgressIndicator(color: Color(0xFFFF3B5C)),
+                  const SizedBox(height: 16),
+                  Text(
+                    loadingText,
+                    style: const TextStyle(fontSize: 13, color: Color(0xFFA0A0B0)),
+                    textAlign: TextAlign.center,
                   ),
-                ),
+                ] else ...[
+                  const Icon(Icons.cloud_off_rounded, size: 46, color: Color(0xFFA0A0B0)),
+                  const SizedBox(height: 12),
+                  Text(
+                    errTitle,
+                    style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w800, color: Colors.white),
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    errSub,
+                    style: const TextStyle(fontSize: 12, color: Color(0xFFA0A0B0)),
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 16),
+                  ElevatedButton.icon(
+                    onPressed: onRefresh,
+                    icon: const Icon(Icons.refresh_rounded, size: 18),
+                    label: Text(errRetry, style: const TextStyle(fontWeight: FontWeight.w800)),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFFFF3B5C),
+                      foregroundColor: Colors.white,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+                    ),
+                  ),
+                ],
               ],
-            ],
+            ),
           ),
-        ),
-      );
+        );
+      }
     }
 
-    final page = _sfMap(sf['page']);
     final blocks = _sfList(sf['blocks']);
     final padH = _sfDouble(page['padding_horizontal'], 20.0);
     final padV = _sfDouble(page['padding_vertical'], 16.0);
@@ -443,7 +827,7 @@ class StorefrontPlansView extends StatelessWidget {
       final blk = _sfMap(rawBlk);
       if (blk.isEmpty) continue;
       if (!isStorefrontBlockVisible(blk, userToken: userToken, userData: userData)) continue;
-      final widget = _buildBlock(context, blk);
+      final widget = _buildBlock(context, blk, messages: messages, page: page);
       if (widget == null) continue;
       visibleCount++;
       final mTop = _sfDouble(blk['margin_top'], 0.0);
@@ -583,19 +967,58 @@ class StorefrontPlansView extends StatelessWidget {
     return content;
   }
 
-  Widget? _buildBlock(BuildContext context, Map<String, dynamic> block) {
+  Future<void> _dispatchFeedbackAction(BuildContext context, Map<String, dynamic> act) async {
+    final t = (act['type'] ?? act['action_type'] ?? '').toString().trim().toLowerCase();
+    final target = (act['target'] ?? '').toString().trim();
+    switch (t) {
+      case 'open_url':
+        final u = (act['url'] ?? target).toString().trim();
+        if (u.isNotEmpty) onLaunchUrl(u);
+        break;
+      case 'switch_tab':
+        final idx = _sfInt(act['tab_index'] ?? target, 0);
+        onSwitchTab(idx.clamp(0, 3));
+        break;
+      case 'open_auth':
+        onRequireAuth();
+        break;
+      case 'open_upgrade':
+        onUpgrade();
+        break;
+      case 'copy':
+      case 'copy_text':
+        final val = (act['copy_value'] ?? target).toString();
+        if (val.isNotEmpty) {
+          Clipboard.setData(ClipboardData(text: val));
+          onShowToast((act['toast_text'] ?? 'کپی شد: $val').toString());
+        }
+        break;
+      case 'refresh':
+        onRefresh();
+        break;
+      default:
+        break;
+    }
+  }
+
+  Widget? _buildBlock(
+    BuildContext context,
+    Map<String, dynamic> block, {
+    Map<String, dynamic> messages = const {},
+    Map<String, dynamic> page = const {},
+  }) {
     final type = (block['type'] ?? '').toString().trim().toLowerCase();
     switch (type) {
       case 'upgrade_card':
-        return _buildUpgradeCardBlock(block);
+        return _buildUpgradeCardBlock(context, block, messages: messages);
       case 'active_status':
         return _buildActiveStatusBlock(block);
       case 'plan':
-        return _buildPlanBlock(context, block);
+        return _buildPlanBlock(context, block, messages: messages, page: page);
       case 'custom_box':
         return _buildCustomBoxBlock(context, block);
       case 'grid_row':
-        return _buildGridRowBlock(context, block);
+        return _buildGridRowBlock(context, block, messages: messages, page: page);
       case 'section_header':
         return _buildSectionHeaderBlock(block);
       case 'divider':
@@ -611,7 +1034,11 @@ class StorefrontPlansView extends StatelessWidget {
     }
   }
 
-  Widget? _buildUpgradeCardBlock(Map<String, dynamic> block) {
+  Widget? _buildUpgradeCardBlock(
+    BuildContext context,
+    Map<String, dynamic> block, {
+    Map<String, dynamic> messages = const {},
+  }) {
     final isLoggedIn = userToken != null && userToken!.isNotEmpty;
     final isExpired = userData?['is_expired'] == true;
     final isTrial = userData?['is_trial'] == true;
@@ -705,7 +1132,7 @@ class StorefrontPlansView extends StatelessWidget {
       final st = _sfMap(block['max_tier_state']);
       final iconName = (st['icon'] ?? 'verified').toString();
       final trailingName = (st['trailing_icon'] ?? 'lock_outline').toString();
-      return Container(
+      final maxCard = Container(
         padding: EdgeInsets.symmetric(
           horizontal: _sfDouble(st['padding_h'], 16.0),
           vertical: _sfDouble(st['padding_v'], 13.0),
@@ -724,7 +1151,7 @@ class StorefrontPlansView extends StatelessWidget {
                 padding: const EdgeInsets.all(8),
                 decoration: BoxDecoration(
                   color: parseHexColor(st['icon_bg_color'], const Color(0x1A00E676)),
-                  borderRadius: BorderRadius.circular(8),
+                  borderRadius: BorderRadius.circular(10),
                 ),
                 child: Icon(
                   resolveStorefrontIcon(iconName),
@@ -768,6 +1195,22 @@ class StorefrontPlansView extends StatelessWidget {
           ],
         ),
       );
+      final tapFbRaw = st['tap_feedback'] ?? st['tap_message'];
+      if (tapFbRaw != null && tapFbRaw.toString().trim().isNotEmpty) {
+        return GestureDetector(
+          onTap: () {
+            final fb = resolveStorefrontFeedback(tapFbRaw, messages);
+            showServerFeedback(
+              context,
+              fb,
+              onToast: onShowToast,
+              onAction: (act) => _dispatchFeedbackAction(context, act),
+            );
+          },
+          child: maxCard,
+        );
+      }
+      return maxCard;
     }
 
     return null;
@@ -776,16 +1219,36 @@ class StorefrontPlansView extends StatelessWidget {
   Widget _buildActiveStatusBlock(Map<String, dynamic> block) {
     final cs = _sfMap(block['card_style']);
     final isLoggedIn = userToken != null && userToken!.isNotEmpty;
-    final titleRaw = isLoggedIn
-        ? (block['title'] ?? 'وضعیت اشتراک: {tier}').toString()
-        : (block['guest_title'] ?? 'وارد حساب کاربری نشده‌اید').toString();
-    final subRaw = isLoggedIn
-        ? (block['subtitle'] ?? 'زمان باقی‌مانده: {remaining}').toString()
-        : (block['guest_subtitle'] ?? 'جهت خرید اشتراک وارد حساب شوید').toString();
+    final isExpired = userData?['is_expired'] == true;
+    final isTrial = userData?['is_trial'] == true;
+    final userTier = (userData?['plan_tier'] ?? '').toString().trim().toLowerCase();
+
+    String titleRaw;
+    String subRaw;
+    if (!isLoggedIn) {
+      titleRaw = (block['guest_title'] ?? 'وارد حساب کاربری نشده‌اید').toString();
+      subRaw = (block['guest_subtitle'] ?? 'جهت خرید اشتراک وارد حساب شوید').toString();
+    } else if (isExpired) {
+      titleRaw = (block['expired_title'] ?? block['title'] ?? 'وضعیت اشتراک: {tier}').toString();
+      subRaw = (block['expired_subtitle'] ?? block['subtitle'] ?? 'زمان باقی‌مانده: {remaining}').toString();
+    } else if (isTrial) {
+      titleRaw = (block['trial_title'] ?? block['title'] ?? 'وضعیت اشتراک: {tier}').toString();
+      subRaw = (block['trial_subtitle'] ?? block['subtitle'] ?? 'زمان باقی‌مانده: {remaining}').toString();
+    } else if (userTier == 'plus') {
+      titleRaw = (block['plus_title'] ?? block['title'] ?? 'وضعیت اشتراک: {tier}').toString();
+      subRaw = (block['plus_subtitle'] ?? block['subtitle'] ?? 'زمان باقی‌مانده: {remaining}').toString();
+    } else if (userTier == 'pro') {
+      titleRaw = (block['pro_title'] ?? block['title'] ?? 'وضعیت اشتراک: {tier}').toString();
+      subRaw = (block['pro_subtitle'] ?? block['subtitle'] ?? 'زمان باقی‌مانده: {remaining}').toString();
+    } else {
+      titleRaw = (block['title'] ?? 'وضعیت اشتراک: {tier}').toString();
+      subRaw = (block['subtitle'] ?? 'زمان باقی‌مانده: {remaining}').toString();
+    }
 
     final title = resolveStorefrontTemplate(titleRaw, userToken: userToken, userData: userData);
     final subtitle = resolveStorefrontTemplate(subRaw, userToken: userToken, userData: userData);
     final iconName = (block['icon'] ?? 'verified').toString();
+    final guestBtnText = (block['guest_btn_text'] ?? 'ورود').toString();
 
     return Container(
       padding: EdgeInsets.symmetric(
@@ -844,7 +1307,7 @@ class StorefrontPlansView extends StatelessWidget {
           if (!isLoggedIn)
             TextButton(
               onPressed: onRequireAuth,
-              child: const Text('ورود', style: TextStyle(color: Color(0xFFFF3B5C), fontWeight: FontWeight.w800)),
+              child: Text(guestBtnText, style: const TextStyle(color: Color(0xFFFF3B5C), fontWeight: FontWeight.w800)),
             ),
         ],
       ),
@@ -884,7 +1347,12 @@ class StorefrontPlansView extends StatelessWidget {
     );
   }
 
-  Widget? _buildGridRowBlock(BuildContext context, Map<String, dynamic> block) {
+  Widget? _buildGridRowBlock(
+    BuildContext context,
+    Map<String, dynamic> block, {
+    Map<String, dynamic> messages = const {},
+    Map<String, dynamic> page = const {},
+  }) {
     final cols = _sfList(block['columns']);
     final spacing = _sfDouble(block['spacing'], 12.0);
     final visibleWidgets = <Widget>[];
@@ -892,7 +1360,7 @@ class StorefrontPlansView extends StatelessWidget {
       final colMap = _sfMap(rawCol);
       if (colMap.isEmpty) continue;
       if (!isStorefrontBlockVisible(colMap, userToken: userToken, userData: userData)) continue;
-      final w = _buildBlock(context, colMap);
+      final w = _buildBlock(context, colMap, messages: messages, page: page);
       if (w != null) visibleWidgets.add(w);
     }
     if (visibleWidgets.isEmpty) return null;
@@ -910,7 +1378,12 @@ class StorefrontPlansView extends StatelessWidget {
     );
   }
 
-  Widget _buildPlanBlock(BuildContext context, Map<String, dynamic> block) {
+  Widget _buildPlanBlock(
+    BuildContext context,
+    Map<String, dynamic> block, {
+    Map<String, dynamic> messages = const {},
+    Map<String, dynamic> page = const {},
+  }) {
     final cs = _sfMap(block['card_style']);
     final badge = _sfMap(block['badge']);
     final features = _sfList(block['features']);
@@ -921,6 +1394,7 @@ class StorefrontPlansView extends StatelessWidget {
     final title = (block['title'] ?? 'پلن اشتراک').toString();
     final subtitle = (block['subtitle'] ?? '').toString().trim();
     final footerNote = (block['footer_note'] ?? '').toString().trim();
+    final currencyLabel = (page['currency_label'] ?? 'تومان').toString();
 
     final isLoggedIn = userToken != null && userToken!.isNotEmpty;
     final isExpired = userData?['is_expired'] == true;
@@ -938,7 +1412,9 @@ class StorefrontPlansView extends StatelessWidget {
     if (showLocked) {
       final ln = _sfMap(block['locked_notice']);
       final lockIcon = (ln['icon'] ?? 'block').toString();
-      actionArea = Container(
+      final lockTextRaw = (ln['text'] ?? 'این پلن برای اشتراک فعلی شما غیرقابل انتخاب است.').toString();
+      final lockText = resolveStorefrontTemplate(lockTextRaw, userToken: userToken, userData: userData);
+      final lockBox = Container(
         width: double.infinity,
         padding: EdgeInsets.symmetric(vertical: _sfDouble(ln['padding_v'], 12.0), horizontal: 12),
         decoration: BoxDecoration(
@@ -959,7 +1435,7 @@ class StorefrontPlansView extends StatelessWidget {
             ],
             Flexible(
               child: Text(
-                (ln['text'] ?? 'این پلن برای اشتراک فعلی شما غیرقابل انتخاب است.').toString(),
+                lockText,
                 textAlign: TextAlign.center,
                 style: TextStyle(
                   fontSize: 11.5,
@@ -971,6 +1447,24 @@ class StorefrontPlansView extends StatelessWidget {
           ],
         ),
       );
+      final tapFbRaw = ln['tap_feedback'] ?? ln['feedback'] ?? ln['tap_message'];
+      if (tapFbRaw != null && tapFbRaw.toString().trim().isNotEmpty) {
+        actionArea = InkWell(
+          borderRadius: BorderRadius.circular(_sfDouble(ln['border_radius'], 8.0)),
+          onTap: () {
+            final fb = resolveStorefrontFeedback(tapFbRaw, messages, fallbackKey: 'plan_locked');
+            showServerFeedback(
+              context,
+              fb,
+              onToast: onShowToast,
+              onAction: (act) => _dispatchFeedbackAction(context, act),
+            );
+          },
+          child: lockBox,
+        );
+      } else {
+        actionArea = lockBox;
+      }
     } else if (showUpgrade) {
       final ub = _sfMap(block['upgrade_button']);
       final upIcon = (ub['icon'] ?? 'upgrade').toString();
@@ -995,7 +1489,7 @@ class StorefrontPlansView extends StatelessWidget {
         ),
       );
     } else {
-      actionArea = _buildPlanOptionsArea(block, options, isActivePaid: isActivePaid);
+      actionArea = _buildPlanOptionsArea(block, options, isActivePaid: isActivePaid, currencyLabel: currencyLabel);
     }
 
     final defaultFeatIcon = (cs['feature_icon'] ?? 'check_circle').toString();
@@ -1210,6 +1704,7 @@ class StorefrontPlansView extends StatelessWidget {
     Map<String, dynamic> planBlock,
     List<dynamic> rawOptions, {
     required bool isActivePaid,
+    String currencyLabel = 'تومان',
   }) {
     final options = rawOptions.map(_sfMap).where((o) => o.isNotEmpty).toList();
     if (options.isEmpty) return const SizedBox.shrink();
@@ -1222,7 +1717,7 @@ class StorefrontPlansView extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           for (int i = 0; i < options.length; i++) ...[
-            _buildSingleOptionButton(planBlock, options[i], isActivePaid: isActivePaid),
+            _buildSingleOptionButton(planBlock, options[i], isActivePaid: isActivePaid, currencyLabel: currencyLabel),
             if (i < options.length - 1) SizedBox(height: spacing),
           ],
         ],
@@ -1236,7 +1731,7 @@ class StorefrontPlansView extends StatelessWidget {
         final slice = options.sublist(i, (i + cols > options.length) ? options.length : i + cols);
         final rowItems = <Widget>[];
         for (int j = 0; j < slice.length; j++) {
-          rowItems.add(Expanded(child: _buildSingleOptionButton(planBlock, slice[j], isActivePaid: isActivePaid)));
+          rowItems.add(Expanded(child: _buildSingleOptionButton(planBlock, slice[j], isActivePaid: isActivePaid, currencyLabel: currencyLabel)));
           if (j < slice.length - 1) rowItems.add(SizedBox(width: spacing));
         }
         // Fill empty space if last row has fewer items
@@ -1253,7 +1748,7 @@ class StorefrontPlansView extends StatelessWidget {
     // Default 'row'
     final rowWidgets = <Widget>[];
     for (int i = 0; i < options.length; i++) {
-      rowWidgets.add(Expanded(child: _buildSingleOptionButton(planBlock, options[i], isActivePaid: isActivePaid)));
+      rowWidgets.add(Expanded(child: _buildSingleOptionButton(planBlock, options[i], isActivePaid: isActivePaid, currencyLabel: currencyLabel)));
       if (i < options.length - 1) rowWidgets.add(SizedBox(width: spacing));
     }
     return Row(crossAxisAlignment: CrossAxisAlignment.start, children: rowWidgets);
@@ -1263,9 +1758,11 @@ class StorefrontPlansView extends StatelessWidget {
     Map<String, dynamic> planBlock,
     Map<String, dynamic> opt, {
     required bool isActivePaid,
+    String currencyLabel = 'تومان',
   }) {
     final style = _sfMap(opt['style']);
     final enabled = _sfBool(opt['enabled'], true);
+    final silentDisabled = opt['silent_when_disabled'] == true;
     final variant = (style['variant'] ?? 'outlined').toString().trim().toLowerCase();
     final radius = _sfDouble(style['border_radius'], 8.0);
     final padV = _sfDouble(style['padding_v'], 8.0);
@@ -1299,7 +1796,7 @@ class StorefrontPlansView extends StatelessWidget {
     final priceText = enabled
         ? ((opt['price_text'] ?? '').toString().isNotEmpty
             ? opt['price_text'].toString()
-            : formatTomanComma(_sfInt(opt['price'], 0)))
+            : formatTomanComma(_sfInt(opt['price'], 0), currencyLabel: currencyLabel))
         : (opt['disabled_text'] ?? 'ناموجود').toString();
     final origPriceText = (opt['original_price_text'] ?? '').toString().trim();
     final discountBadge = (opt['discount_badge'] ?? '').toString().trim();
@@ -1320,7 +1817,7 @@ class StorefrontPlansView extends StatelessWidget {
         borderRadius: BorderRadius.circular(radius),
         clipBehavior: Clip.antiAlias,
         child: InkWell(
-          onTap: enabled ? () => onPurchaseOption(opt, planBlock) : null,
+          onTap: (enabled || !silentDisabled) ? () => onPurchaseOption(opt, planBlock) : null,
           child: Padding(
             padding: EdgeInsets.symmetric(horizontal: 8, vertical: padV),
             child: Column(
@@ -1777,6 +2274,7 @@ Future<bool?> showServerPreInvoiceDialog({
   final totalLblColor = parseHexColor(preCfg['total_label_color'], Colors.white);
   final totalValColor = parseHexColor(preCfg['total_value_color'], const Color(0xFF00E676));
   final footerNote = (preCfg['footer_note'] ?? 'پرداخت امن از طریق درگاه رسمی انجام می‌شود و اشتراک بلافاصله فعال می‌گردد.').toString();
+  final warningText = (preCfg['warning_text'] ?? '').toString().trim();
 
   return showDialog<bool>(
     context: context,
@@ -1868,6 +2366,28 @@ Future<bool?> showServerPreInvoiceDialog({
                 ],
               ),
             ),
+            if (warningText.isNotEmpty) ...[
+              const SizedBox(height: 10),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                decoration: BoxDecoration(
+                  color: parseHexColor(preCfg['warning_bg_color'], const Color(0x1AFFAB00)),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: parseHexColor(preCfg['warning_border_color'], const Color(0x4DFFAB00))),
+                ),
+                child: Text(
+                  warningText,
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                    color: parseHexColor(preCfg['warning_text_color'], const Color(0xFFFFD54F)),
+                    height: 1.5,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+              ),
+            ],
             if (footerNote.isNotEmpty) ...[
               const SizedBox(height: 12),
               Text(
@@ -2008,13 +2528,13 @@ Future<bool?> showServerUpgradeInvoiceDialog({
                       Text(toPlan, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800, color: parseHexColor(upiCfg['to_plan_color'], const Color(0xFFFFAB00)))),
                     ],
                   ),
-                  if (remainingDays > 0) ...[
+                  if (_sfBool(upiCfg['show_remaining_days_row'], true) && remainingDays > 0) ...[
                     Divider(color: divColor, height: 18),
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
                         Text((upiCfg['label_remaining_days'] ?? 'مدت زمان باقی‌مانده').toString(), style: const TextStyle(fontSize: 12, color: Color(0xFFA0A0B0))),
-                        Text('$remainingDays روز', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: Color(0xFFE0E0EC))),
+                        Text('$remainingDays ${(upiCfg['days_suffix'] ?? 'روز').toString()}', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: Color(0xFFE0E0EC))),
                       ],
                     ),
                   ],

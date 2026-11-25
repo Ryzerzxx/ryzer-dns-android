@@ -129,17 +129,17 @@ class ApiService {
         headers: {
           'Authorization': 'Bearer $token',
           'User-Agent': userAgent,
+          'X-App-Channel': buildChannel,
         },
       ).timeout(const Duration(seconds: 10));
 
       final data = jsonDecode(utf8.decode(response.bodyBytes));
       if (response.statusCode == 200 && (data['status'] == 'success' || data['plan_tier'] != null)) {
-        int daysLeft = 0;
-        int hoursLeft = 0;
-        bool isExpired = false;
-        String remainingText = '';
+        int daysLeft = (data['days_left'] is num) ? (data['days_left'] as num).toInt() : 0;
+        bool isExpired = data['is_expired'] == true;
+        String remainingText = (data['remaining_text'] ?? '').toString().trim();
 
-        if (data['plan_expires_at'] != null) {
+        if (remainingText.isEmpty && data['plan_expires_at'] != null) {
           try {
             final exp = DateTime.parse(data['plan_expires_at']);
             final diff = exp.difference(DateTime.now());
@@ -148,7 +148,7 @@ class ApiService {
               remainingText = 'منقضی شده';
             } else {
               daysLeft = diff.inDays;
-              hoursLeft = diff.inHours % 24;
+              final hoursLeft = diff.inHours % 24;
               if (daysLeft > 0) {
                 remainingText = '$daysLeft روز و $hoursLeft ساعت باقیمانده';
               } else {
@@ -170,6 +170,7 @@ class ApiService {
             'is_trial': data['is_trial'] == true,
             'has_paid': data['has_paid'] == true,
             'remaining_text': remainingText,
+            'plan_expires_at': data['plan_expires_at'] ?? '',
             'registered_ip': data['registered_ip'] ?? '',
             'referral_code': data['referral_code'] ?? '',
             'telegram_id': data['telegram_id'] ?? 0,
@@ -268,6 +269,7 @@ class ApiService {
 
   /// Get dynamic package quote from server (read-only metadata)
   static Future<Map<String, dynamic>> getPaymentQuote({
+    String? token,
     String? packageKey,
     required String tier,
     required int months,
@@ -275,9 +277,17 @@ class ApiService {
     try {
       final pk = Uri.encodeComponent((packageKey ?? '').trim());
       final t = Uri.encodeComponent(tier.toLowerCase().trim());
+      final ch = Uri.encodeComponent(buildChannel);
+      final headers = <String, String>{
+        'User-Agent': userAgent,
+        'X-App-Channel': buildChannel,
+      };
+      if (token != null && token.isNotEmpty) {
+        headers['Authorization'] = 'Bearer $token';
+      }
       final response = await http.get(
-        Uri.parse('$baseUrl/api/payment/quote?package_key=$pk&tier=$t&months=$months'),
-        headers: {'User-Agent': userAgent},
+        Uri.parse('$baseUrl/api/payment/quote?package_key=$pk&tier=$t&months=$months&channel=$ch'),
+        headers: headers,
       ).timeout(const Duration(seconds: 8));
 
       final data = jsonDecode(utf8.decode(response.bodyBytes));
@@ -286,6 +296,7 @@ class ApiService {
       } else {
         return {
           'ok': false,
+          'statusCode': response.statusCode,
           'detail': (data is Map ? (data['detail'] ?? data['message']) : null) ?? 'خطا در استعلام مشخصات پلن.',
         };
       }
