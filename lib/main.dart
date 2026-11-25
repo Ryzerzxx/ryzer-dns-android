@@ -617,7 +617,11 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
         final regRes = await ApiService.registerIp(_userToken!, manualIp: _currentDetectedIp);
         if (regRes['success'] != true) {
           setState(() => _isConnecting = false);
-          _showToast(regRes['message'] ?? 'ثبت آی‌پی با خطا مواجه شد. اشتراک خود را بررسی نمایید.');
+          await _showStorefrontFeedbackKey(
+            'ip_register_failed',
+            overrideRaw: regRes['message']?.toString(),
+            fallbackText: 'ثبت آی‌پی با خطا مواجه شد. اشتراک خود را بررسی نمایید.',
+          );
           return;
         }
         if (mounted) {
@@ -919,15 +923,15 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
     final rawRemaining = (_userData?['remaining_text'] ?? '').toString().trim();
     final remaining = rawRemaining.isNotEmpty
         ? rawRemaining
-        : (sc['checking_remaining_text'] ?? 'در حال بررسی...').toString();
+        : (sc['remaining_fallback_text'] ?? sc['checking_remaining_text'] ?? 'در حال بررسی...').toString();
 
     String statusTitleRaw;
     if (isExpired) {
-      statusTitleRaw = (sc['expired_title'] ?? 'اشتراک به اتمام رسیده').toString();
+      statusTitleRaw = (sc['status_expired_text'] ?? sc['expired_title'] ?? 'اشتراک به اتمام رسیده').toString();
     } else if (isTrial) {
-      statusTitleRaw = (sc['trial_title'] ?? 'دوره تست فعال').toString();
+      statusTitleRaw = (sc['status_trial_text'] ?? sc['trial_title'] ?? 'سرویس فعال').toString();
     } else {
-      statusTitleRaw = (sc['active_title'] ?? 'سرویس فعال').toString();
+      statusTitleRaw = (sc['status_active_text'] ?? sc['active_title'] ?? 'سرویس فعال').toString();
     }
     final statusTitle = resolveStorefrontTemplate(statusTitleRaw, userToken: _userToken, userData: _userData);
 
@@ -936,17 +940,24 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
         ? resolveStorefrontTemplate(subTpl, userToken: _userToken, userData: _userData)
         : remaining;
 
+    final trialBtnCustom = (sc['btn_trial_text'] ?? sc['btn_active_trial_text'] ?? '').toString().trim();
     String btnTextRaw;
     if (isExpired) {
       btnTextRaw = (sc['btn_expired_text'] ?? 'خرید اشتراک').toString();
-    } else if (isTrial) {
-      btnTextRaw = (sc['btn_active_trial_text'] ?? 'خرید اشتراک').toString();
+    } else if (isTrial && trialBtnCustom.isNotEmpty) {
+      btnTextRaw = trialBtnCustom;
     } else if (tier.toLowerCase() == 'pro') {
       btnTextRaw = (sc['btn_active_pro_text'] ?? 'تمدید اشتراک').toString();
-    } else {
+    } else if (tier.toLowerCase() == 'plus') {
       btnTextRaw = (sc['btn_active_plus_text'] ?? 'تمدید یا ارتقا').toString();
+    } else {
+      btnTextRaw = (sc['btn_active_default_text'] ?? 'تمدید اشتراک').toString();
     }
     final btnText = resolveStorefrontTemplate(btnTextRaw, userToken: _userToken, userData: _userData);
+
+    final rawTierLabels = sc['tier_labels'];
+    final tierLabels = rawTierLabels is Map ? Map<String, dynamic>.from(rawTierLabels) : <String, dynamic>{};
+    final tierBadgeText = (tierLabels[tier.toLowerCase()] ?? tier.toUpperCase()).toString();
 
     final activeBorder = parseHexColor(sc['active_border_color'], const Color(0x3300E676));
     final expiredBorder = parseHexColor(sc['expired_border_color'], const Color(0x4DFF3B5C));
@@ -979,7 +990,7 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
                         border: Border.all(color: isExpired ? expiredColor : activeColor),
                       ),
                       child: Text(
-                        '$badgePrefix${tier.toUpperCase()}',
+                        '$badgePrefix$tierBadgeText',
                         style: TextStyle(
                           fontFamily: 'Syne',
                           fontSize: 11,
@@ -1395,7 +1406,7 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
   Future<void> _launchExternalUrl(String rawUrl) async {
     final uri = Uri.tryParse(rawUrl.trim());
     if (uri == null || uri.scheme.toLowerCase() != 'https' || uri.host.isEmpty) {
-      _showToast('آدرس لینک نامعتبر است.');
+      await _showStorefrontFeedbackKey('invalid_link_error', fallbackText: 'آدرس لینک نامعتبر است.');
       return;
     }
     try {
@@ -1407,7 +1418,7 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
       try {
         await launchUrl(uri, mode: LaunchMode.platformDefault);
       } catch (e) {
-        _showToast('امکان باز کردن لینک وجود ندارد.');
+        await _showStorefrontFeedbackKey('open_browser_error', fallbackText: 'امکان باز کردن لینک وجود ندارد.');
       }
     }
   }
@@ -1475,6 +1486,10 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
     Map<String, dynamic> planBlock,
   ) async {
     if (_userToken == null) {
+      final authMsg = _storefrontMessages['auth_required_purchase'];
+      if (authMsg != null && authMsg.toString().trim().isNotEmpty) {
+        await _showStorefrontFeedbackKey('auth_required_purchase');
+      }
       _showAuthModal();
       return;
     }
@@ -1548,7 +1563,7 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
       totalAmount = baseAmount;
     } else {
       await _showStorefrontFeedbackKey(
-        'quote_failed',
+        'quote_error',
         overrideRaw: quote['detail']?.toString(),
         fallbackText: 'خطا در استعلام مشخصات پلن از سرور.',
       );
@@ -1586,6 +1601,10 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
 
   Future<void> _handleUpgradePlan() async {
     if (_userToken == null) {
+      final authMsg = _storefrontMessages['auth_required_upgrade'];
+      if (authMsg != null && authMsg.toString().trim().isNotEmpty) {
+        await _showStorefrontFeedbackKey('auth_required_upgrade');
+      }
       _showAuthModal();
       return;
     }
@@ -1621,9 +1640,19 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
         ? (upCfg['from_tiers'] as List).map((e) => e.toString().trim().toLowerCase()).toList()
         : <String>['plus'];
 
-    if (!fromTiers.contains(userTier) || isExpired || isTrial) {
+    if (isExpired) {
+      await _showStorefrontFeedbackKey('upgrade_expired', fallbackText: 'اشتراک شما به پایان رسیده است؛ لطفاً ابتدا اشتراک جدید تهیه فرمایید.');
+      return;
+    }
+
+    if (isTrial) {
+      await _showStorefrontFeedbackKey('upgrade_trial', fallbackText: 'امکان ارتقا فقط برای کاربران دارای اشتراک فعال Plus امکان‌پذیر است.');
+      return;
+    }
+
+    if (!fromTiers.contains(userTier)) {
       await _showStorefrontFeedbackKey(
-        'upgrade_only_plus',
+        'upgrade_only_active_plus',
         fallbackText: 'امکان ارتقا فقط برای کاربران دارای اشتراک فعال Plus امکان‌پذیر است.',
       );
       return;
@@ -1678,13 +1707,13 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
       if (connectingToast.trim().isNotEmpty) {
         _showToast(connectingToast);
       } else {
-        await _showStorefrontFeedbackKey('myket_connecting', fallbackText: 'در حال اتصال به درگاه مایکت...');
+        await _showStorefrontFeedbackKey('myket_connecting', fallbackText: 'در حال اتصال به مایکت...');
       }
 
       final ready = await _ensureMyketIabReady();
       if (!ready) {
         await _showStorefrontFeedbackKey(
-          'myket_not_ready',
+          'myket_init_failed',
           fallbackText: 'اتصال به سرویس پرداخت مایکت برقرار نشد. لطفاً از نصب و به‌روزرسانی برنامه مایکت مطمئن شوید.',
         );
         return;
@@ -1722,7 +1751,7 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
           } catch (_) {}
 
           await _showStorefrontFeedbackKey(
-            'myket_purchase_success',
+            'myket_activated',
             fallbackText: 'اشتراک شما با موفقیت فعال شد!',
           );
           await _refreshUserProfile();
@@ -1739,7 +1768,7 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
       } else {
         final code = iabResult?.mResponse ?? -999;
         if (code == 1) {
-          await _showStorefrontFeedbackKey('myket_purchase_canceled', fallbackText: 'پرداخت توسط شما لغو شد.');
+          await _showStorefrontFeedbackKey('myket_cancelled', fallbackText: 'پرداخت توسط شما لغو شد.');
         } else if (code == 7) {
           // ITEM_ALREADY_OWNED: verify unconsumed purchase with server first, then consume!
           await _showStorefrontFeedbackKey(
@@ -1765,13 +1794,13 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
                   await MyketIAP.consume(purchase: owned);
                 } catch (_) {}
                 await _showStorefrontFeedbackKey(
-                  'myket_already_owned_success',
+                  'myket_already_owned_activated',
                   fallbackText: 'اشتراک شما فعال شد و امکان خرید مجدد باز گردید.',
                 );
                 await _refreshUserProfile();
               } else {
                 await _showStorefrontFeedbackKey(
-                  'myket_already_owned_failed',
+                  'myket_already_owned_verify_failed',
                   overrideRaw: valRes['message']?.toString(),
                   fallbackText: 'خطا در بازیابی خرید قبلی مایکت.',
                 );
@@ -1779,18 +1808,18 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
             }
           } catch (_) {
             await _showStorefrontFeedbackKey(
-              'myket_already_owned_failed',
+              'myket_already_owned_error',
               fallbackText: 'خطا در بازیابی خرید قبلی از مایکت.',
             );
           }
         } else if (code == -1003) {
           await _showStorefrontFeedbackKey(
-            'myket_signature_error',
+            'myket_rsa_error',
             fallbackText: 'خطا در تایید امضای امنیتی مایکت. لطفاً برنامه مایکت را به‌روزرسانی کنید.',
           );
         } else {
           await _showStorefrontFeedbackKey(
-            'myket_purchase_failed',
+            'myket_failed',
             overrideRaw: iabResult?.mMessage,
             fallbackText: 'پرداخت انجام نشد.',
           );
@@ -1798,7 +1827,7 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
       }
     } catch (e) {
       await _showStorefrontFeedbackKey(
-        'myket_launch_error',
+        'myket_launch_exception',
         fallbackText: 'خطا در اجرای فرآیند خرید مایکت. لطفاً نصب بودن مایکت را بررسی فرمایید.',
       );
     }
